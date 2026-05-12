@@ -1,0 +1,27 @@
+{
+  "name": "示例Zeroconf集成",
+  "description": "通过Zeroconf发现设备的集成。",
+  "options": {
+    "title": "设置"
+  },
+  "device_name": "示例设备",
+  "config": {
+    "abort": {
+      "already_configured": "该设备已经配置"
+    },
+    "step": {
+      "confirm": {
+        "title": "确认添加 AECC 设备",
+        "description": "是否要添加以下 AECC 设备？\n\n设备序列号: {device_sn}\n设备 IP: {device_ip}\n设备类型: {device_type}"
+      },
+      "user": {
+        "title": "添加示例设备",
+        "data": {
+          "host": "主机地址",
+          "port": "端口",
+          "name": "设备名称"
+        }
+      }
+    }
+  }
+}

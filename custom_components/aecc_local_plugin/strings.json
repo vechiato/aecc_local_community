@@ -1,0 +1,21 @@
+{
+  "config": {
+    "abort": {
+      "already_configured": "This device is already configured."
+    },
+    "step": {
+      "confirm": {
+        "title": "Confirm AECC Device",
+        "description": "Add the following AECC device?\n\nSerial Number: {device_sn}\nIP Address: {device_ip}\nDevice Type: {device_type}"
+      },
+      "user": {
+        "title": "Add AECC Device",
+        "data": {
+          "host": "Host",
+          "port": "Port",
+          "name": "Device Name"
+        }
+      }
+    }
+  }
+}
