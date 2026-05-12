@@ -1,5 +1,5 @@
-DOMAIN="aecc_local_plugin"
-LOGGER_NAME = "custom_components.aecc_local_plugin"
+DOMAIN="aecc_local_community"
+LOGGER_NAME = "custom_components.aecc_local_community"
 
 DEVICE_TYPE_MAP = [
     (1, 49, "逆变器/离网机/储能机"),

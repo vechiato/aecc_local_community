@@ -17,14 +17,14 @@ Discovers devices via mDNS/Zeroconf and communicates over a persistent local TCP
 ## Installation via HACS
 
 1. In HACS, go to **Integrations → ⋮ → Custom repositories**
-2. Add `https://github.com/vechiato/aecc_local_unofficial` with category **Integration**
+2. Add `https://github.com/vechiato/aecc_local_community` with category **Integration**
 3. Install **AECC Local (Unofficial)**
 4. Restart Home Assistant
 5. Go to **Settings → Devices & Services → Add Integration** and search for **AECC Local**
 
 ## Manual installation
 
-Copy `custom_components/aecc_local_plugin/` into your HA `custom_components/` directory and restart.
+Copy `custom_components/aecc_local_community/` into your HA `custom_components/` directory and restart.
 
 ## Notes
 
