@@ -1,6 +1,6 @@
-# AECC Local (Unofficial)
+# AECC Local (Community)
 
-Unofficial Home Assistant integration for AECC energy management devices (inverters, batteries, EV chargers, smart plugs, hot water controllers).
+Community Home Assistant integration for AECC energy management devices (inverters, batteries, EV chargers, smart plugs, hot water controllers).
 
 Discovers devices via mDNS/Zeroconf and communicates over a persistent local TCP connection — no cloud required.
 
@@ -18,7 +18,7 @@ Discovers devices via mDNS/Zeroconf and communicates over a persistent local TCP
 
 1. In HACS, go to **Integrations → ⋮ → Custom repositories**
 2. Add `https://github.com/vechiato/aecc_local_community` with category **Integration**
-3. Install **AECC Local (Unofficial)**
+3. Install **AECC Local (Community)**
 4. Restart Home Assistant
 5. Go to **Settings → Devices & Services → Add Integration** and search for **AECC Local**
 
