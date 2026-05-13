@@ -27,7 +27,7 @@ SENSOR_MAP = {
         "pv_charge_power": ("TotalPVChargePower", UnitOfPower.WATT),
         "ac_charge_power": ("TotalACChargePower", UnitOfPower.WATT),
         "smart_load_power": ("TotalSmartLoadElectricalPower", UnitOfPower.WATT),
-        "battery_soc": ("AverageBatteryAverageSOC", PERCENTAGE),
+        "avg_battery_soc": ("AverageBatteryAverageSOC", PERCENTAGE),
         "battery_output_power": ("TotalBatteryOutputPower", UnitOfPower.WATT),
         "grid_output_power": ("TotalGridOutputPower", UnitOfPower.WATT),
         "backup_power": ("TotalBackUpPower", UnitOfPower.WATT),
