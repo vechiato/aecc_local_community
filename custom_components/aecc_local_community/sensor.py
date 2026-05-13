@@ -71,8 +71,12 @@ SENSOR_MAP = {
 
 # Energy sensors auto-created for the HA Energy Dashboard.
 # Tuples: (key_suffix, data_type, api_path, label)
+# SSumInfoList entries produce system-total sensors (no SN prefix).
+# Storage_list entries produce per-device sensors (SN prefix).
 ENERGY_SENSOR_DEFS = [
     ("solar_energy", "SSumInfoList", "TotalPVPower", "Solar Energy"),
+    ("battery_charge_energy", "SSumInfoList", "TotalChargePower", "Battery Charge Energy"),
+    ("battery_discharge_energy", "SSumInfoList", "TotalBatteryOutputPower", "Battery Discharge Energy"),
     ("battery_charge_energy", "Storage_list", "BatteryChargingPower", "Battery Charge Energy"),
     ("battery_discharge_energy", "Storage_list", "BatteryDischargingPower", "Battery Discharge Energy"),
 ]

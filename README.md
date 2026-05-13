@@ -28,21 +28,30 @@ Copy `custom_components/aecc_local_community/` into your HA `custom_components/`
 
 ## Energy Dashboard
 
-The integration automatically creates three energy sensors (kWh) when a device is added — no manual helpers needed:
+The integration automatically creates energy sensors (kWh) when a device is added — no manual helpers needed. Values persist across HA restarts.
+
+**System-total sensors** (aggregate across all devices, no device prefix):
 
 | Sensor | Measures |
 |--------|----------|
 | Solar Energy | Cumulative PV production |
-| Battery Charge Energy | Cumulative energy into the battery |
-| Battery Discharge Energy | Cumulative energy out of the battery |
+| Battery Charge Energy | Cumulative energy into all batteries |
+| Battery Discharge Energy | Cumulative energy out of all batteries |
 
-To configure the HA Energy Dashboard:
+**Per-device sensors** (one set per device, prefixed with the device serial number, e.g. `ABC123 Battery Charge Energy`):
+
+| Sensor | Measures |
+|--------|----------|
+| `<SN>` Battery Charge Energy | Cumulative energy into this battery |
+| `<SN>` Battery Discharge Energy | Cumulative energy out of this battery |
+
+**Configuring the HA Energy Dashboard:**
 
 1. Go to **Settings → Dashboards → Energy**
-2. Under **Solar panels**, add the **Solar Energy** sensor
-3. Under **Battery systems**, add a battery using **Battery Charge Energy** (energy going in) and **Battery Discharge Energy** (energy going out)
+2. Under **Solar panels**, add **Solar Energy**
+3. Under **Battery systems**, add a battery using **Battery Charge Energy** (in) and **Battery Discharge Energy** (out)
 
-> Energy values persist across HA restarts.
+For single-device setups the system-total and per-device values will match — use whichever you prefer. For multi-device setups, use the system-total sensors in the Energy Dashboard so all devices are aggregated.
 
 ## Notes
 
