@@ -26,6 +26,24 @@ Discovers devices via mDNS/Zeroconf and communicates over a persistent local TCP
 
 Copy `custom_components/aecc_local_community/` into your HA `custom_components/` directory and restart.
 
+## Energy Dashboard
+
+The integration automatically creates three energy sensors (kWh) when a device is added — no manual helpers needed:
+
+| Sensor | Measures |
+|--------|----------|
+| Solar Energy | Cumulative PV production |
+| Battery Charge Energy | Cumulative energy into the battery |
+| Battery Discharge Energy | Cumulative energy out of the battery |
+
+To configure the HA Energy Dashboard:
+
+1. Go to **Settings → Dashboards → Energy**
+2. Under **Solar panels**, add the **Solar Energy** sensor
+3. Under **Battery systems**, add a battery using **Battery Charge Energy** (energy going in) and **Battery Discharge Energy** (energy going out)
+
+> Energy values persist across HA restarts.
+
 ## Notes
 
 - Requires the device to be on the same local network
