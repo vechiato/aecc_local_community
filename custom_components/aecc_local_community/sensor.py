@@ -2,8 +2,12 @@ import logging
 
 from homeassistant.components.sensor import SensorEntity, SensorDeviceClass, SensorStateClass
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.helpers.restore_state import RestoreEntity
+from homeassistant.core import callback
+from homeassistant.util import dt as dt_util
 from homeassistant.const import (
     UnitOfPower,
+    UnitOfEnergy,
     UnitOfTemperature,
     PERCENTAGE,
 )
@@ -65,47 +69,62 @@ SENSOR_MAP = {
     }
 }
 
+# Energy sensors auto-created for the HA Energy Dashboard.
+# Tuples: (key_suffix, data_type, api_path, label)
+ENERGY_SENSOR_DEFS = [
+    ("solar_energy", "SSumInfoList", "TotalPVPower", "Solar Energy"),
+    ("battery_charge_energy", "Storage_list", "BatteryChargingPower", "Battery Charge Energy"),
+    ("battery_discharge_energy", "Storage_list", "BatteryDischargingPower", "Battery Discharge Energy"),
+]
+
 
 async def async_setup_entry(hass, config_entry, async_add_entities):
     coordinator = hass.data[DOMAIN][config_entry.entry_id]["coordinator"]
     device_sn = config_entry.data["device_sn"]
 
     sensors = []
-    # 遍历map
+
     for data_type, field_map in SENSOR_MAP.items():
         raw_data = coordinator.data.get(data_type)
         if not raw_data:
-            continue  # 数据不存在，跳过
+            continue
 
         if isinstance(raw_data, list):
-            # 遍历各个设备数组
             for item in raw_data:
                 sn = next((item.get(k) for k in SN_KEYS if item.get(k)), None)
                 if not sn:
-                    continue  # 缺少 SN，跳过
-
+                    continue
                 for key, (path, unit) in field_map.items():
-                    value = item.get(path)
-                    if value is None:
-                        continue  # 字段缺失，跳过
-
-                    unique_id = f"{device_sn}_{data_type.lower()}_{sn}_{key}"
-
-
+                    if item.get(path) is None:
+                        continue
                     sensors.append(
                         AECCSensor(coordinator, device_sn, item, data_type, key, path, unit)
                     )
         else:
-            # 非列表结构（如 SSumInfoList）
             item = raw_data
             for key, (path, unit) in field_map.items():
-                value = item.get(path)
-                if value is None:
-                    continue  # 字段缺失，跳过
-
-                unique_id = f"{device_sn}_{data_type.lower()}_{key}"
+                if item.get(path) is None:
+                    continue
                 sensors.append(
                     AECCSensor(coordinator, device_sn, item, data_type, key, path, unit)
+                )
+
+    for key_suffix, data_type, api_path, label in ENERGY_SENSOR_DEFS:
+        raw_data = coordinator.data.get(data_type)
+        if not raw_data:
+            continue
+        if isinstance(raw_data, list):
+            for item in raw_data:
+                sn = next((item.get(k) for k in SN_KEYS if item.get(k)), None)
+                if not sn or item.get(api_path) is None:
+                    continue
+                sensors.append(
+                    AECCEnergySensor(coordinator, device_sn, data_type, api_path, key_suffix, label, sn=sn)
+                )
+        else:
+            if raw_data.get(api_path) is not None:
+                sensors.append(
+                    AECCEnergySensor(coordinator, device_sn, data_type, api_path, key_suffix, label)
                 )
 
     async_add_entities(sensors)
@@ -206,3 +225,96 @@ class AECCSensor(CoordinatorEntity, SensorEntity):
             "manufacturer": "AECC",
         }
 
+
+class AECCEnergySensor(CoordinatorEntity, SensorEntity, RestoreEntity):
+    """Cumulative energy sensor (kWh) derived by integrating a power sensor over time."""
+
+    def __init__(self, coordinator, device_sn, data_type, api_path, key_suffix, label, sn=None):
+        super().__init__(coordinator)
+        self._device_sn = device_sn
+        self._data_type = data_type
+        self._api_path = api_path
+        self._sn = sn
+        self._energy_kwh = 0.0
+        self._last_update = None
+        if sn:
+            self._unique_id = f"aecc_{device_sn}_{data_type.lower()}_{sn}_{key_suffix}"
+            self._attr_name = f"{sn} {label}"
+        else:
+            self._unique_id = f"aecc_{device_sn}_{data_type.lower()}_{key_suffix}"
+            self._attr_name = label
+
+    async def async_added_to_hass(self):
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state and last_state.state not in ("unknown", "unavailable"):
+            try:
+                self._energy_kwh = float(last_state.state)
+            except (ValueError, TypeError):
+                pass
+        self._last_update = dt_util.utcnow()
+
+    def _get_power_w(self):
+        raw = self.coordinator.data.get(self._data_type) if self.coordinator.data else None
+        if raw is None:
+            return None
+        if isinstance(raw, list):
+            item = (
+                next((i for i in raw if any(i.get(k) == self._sn for k in SN_KEYS)), None)
+                if self._sn else (raw[0] if raw else None)
+            )
+        else:
+            item = raw
+        if item is None:
+            return None
+        value = item.get(self._api_path)
+        if value is None:
+            return None
+        power = float(value)
+        if self._data_type == "Storage_list":
+            power /= 10
+        return power
+
+    @callback
+    def _handle_coordinator_update(self):
+        now = dt_util.utcnow()
+        power_w = self._get_power_w()
+        if power_w is not None and self._last_update is not None:
+            elapsed_hours = (now - self._last_update).total_seconds() / 3600
+            self._energy_kwh += max(0.0, power_w * elapsed_hours / 1000)
+        self._last_update = now
+        self.async_write_ha_state()
+
+    @property
+    def unique_id(self):
+        return self._unique_id
+
+    @property
+    def native_value(self):
+        return round(self._energy_kwh, 3)
+
+    @property
+    def native_unit_of_measurement(self):
+        return UnitOfEnergy.KILO_WATT_HOUR
+
+    @property
+    def device_class(self):
+        return SensorDeviceClass.ENERGY
+
+    @property
+    def state_class(self):
+        return SensorStateClass.TOTAL_INCREASING
+
+    @property
+    def device_info(self):
+        model_map = {
+            "SSumInfoList": "System Summary",
+            "Storage_list": "Inverter/Storage",
+        }
+        model = model_map.get(self._data_type, self._data_type)
+        return {
+            "identifiers": {(DOMAIN, self._device_sn)},
+            "name": self._device_sn,
+            "model": model,
+            "manufacturer": "AECC",
+        }
