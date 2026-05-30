@@ -69,8 +69,37 @@ As a result of the `BatteryChargingPower` issue, the per-device `<SN> Battery Ch
 
 If you are running a different firmware version and some of these fields work correctly, please [open an issue](https://github.com/vechiato/aecc_local_community/issues).
 
+## Configuration options
+
+After adding a device, open **Settings → Devices & Services → AECC Local (Community) → Configure** to adjust:
+
+| Option | Default | Range | Description |
+|--------|---------|-------|-------------|
+| Poll interval | 10 s | 5–60 s | How often the integration fetches data from the device |
+
+Changes take effect immediately (the integration reloads automatically).
+
+## Diagnostic entities
+
+Each device exposes two diagnostic sensors to help with troubleshooting:
+
+| Sensor | Description |
+|--------|-------------|
+| Last Successful Update | Timestamp of the most recent successful data fetch |
+| Consecutive Poll Failures | Number of failed polls since the last successful response |
+
+These sensors are hidden by default — enable them under the device's entity list if needed.
+
+## HA diagnostics download
+
+The integration supports the standard Home Assistant diagnostics download. Go to **Settings → Devices & Services → AECC Local (Community) → ⋮ → Download diagnostics** to get a redacted snapshot of the integration state (host, IP, and serial number are omitted).
+
+## Reliability
+
+- **Failure tolerance**: the integration holds the last known values for up to 5 consecutive poll failures (or 120 seconds) before marking entities unavailable. Transient network dropouts no longer cause flapping.
+- **SOC cleaning**: battery state-of-charge readings are validated against observable physics. Readings of 0% during active charge or discharge cycles, and impossible rate-of-change jumps, are rejected and replaced with the last accepted value.
+
 ## Notes
 
 - Requires the device to be on the same local network
 - TCP connection is persistent and shared across all entities for the same device
-- Polling interval: 10 seconds
