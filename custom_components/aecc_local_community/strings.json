@@ -1,19 +1,28 @@
 {
   "config": {
     "abort": {
-      "already_configured": "This device is already configured."
+      "already_configured": "This device is already configured.",
+      "not_aecc_device": "Discovered device is not an AECC device."
     },
     "step": {
-      "confirm": {
+      "confirm_discovery": {
         "title": "Confirm AECC Device",
-        "description": "Add the following AECC device?\n\nSerial Number: {device_sn}\nIP Address: {device_ip}\nDevice Type: {device_type}"
-      },
-      "user": {
-        "title": "Add AECC Device",
+        "description": "Add the following AECC device?\n\nSerial Number: {sn}\nIP Address: {ip}\nDevice Type: {type}",
         "data": {
-          "host": "Host",
-          "port": "Port",
-          "name": "Device Name"
+          "deviceName": "Device Name"
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "AECC Device Options",
+        "data": {
+          "poll_interval": "Poll interval (seconds)"
+        },
+        "data_description": {
+          "poll_interval": "How often to fetch data from the device. Range: 5–60 seconds."
         }
       }
     }

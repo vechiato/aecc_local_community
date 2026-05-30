@@ -4,13 +4,20 @@ from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
 from typing import Any, Dict, Optional
 import logging
 import voluptuous as vol
-from .const import DOMAIN, LOGGER_NAME, get_device_type_name
+from .const import (
+    DOMAIN,
+    LOGGER_NAME,
+    CONF_POLL_INTERVAL,
+    DEFAULT_POLL_INTERVAL,
+    MIN_POLL_INTERVAL,
+    MAX_POLL_INTERVAL,
+    get_device_type_name,
+)
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
 
-class AeccLocalPluginConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    """AECC 本地插件配置流程"""
 
+class AeccLocalPluginConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
     MINOR_VERSION = 1
 
@@ -23,16 +30,14 @@ class AeccLocalPluginConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._device_port: int = 0
         self._default_name: str = ""
 
-    async def async_step_zeroconf(
-        self,
-        discovery_info: ZeroconfServiceInfo
-    ):
-        """处理 Zeroconf 发现的设备"""
-        # _LOGGER.info(f"info:{discovery_info}")
+    @staticmethod
+    def async_get_options_flow(config_entry: config_entries.ConfigEntry) -> "AeccLocalOptionsFlow":
+        return AeccLocalOptionsFlow(config_entry)
+
+    async def async_step_zeroconf(self, discovery_info: ZeroconfServiceInfo):
         if not discovery_info.name.startswith("SXD-mDNS-IF"):
             return self.async_abort(reason="not_aecc_device")
 
-        # 提取设备信息
         self._host = str(discovery_info.addresses[0])
         self._port = discovery_info.port
         properties = dict(discovery_info.properties)
@@ -43,29 +48,21 @@ class AeccLocalPluginConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._device_port = properties.get('s_port', 0)
 
         device_type_name = get_device_type_name(self._device_type)
-
         self._default_name = f"{device_type_name}--{self._device_sn}--{self._device_ip}"
 
-
-        _LOGGER.info(f" discovery :{self._default_name}")
+        _LOGGER.info("discovery: %s", self._default_name)
         await self.async_set_unique_id(self._device_sn)
         self._abort_if_unique_id_configured()
 
-        self.context.update({
-            "title_placeholders": {
-                "name": self._default_name
-            }
-        })
-
+        self.context.update({"title_placeholders": {"name": self._default_name}})
         return await self.async_step_confirm_discovery()
 
     async def async_step_confirm_discovery(
         self,
-        user_input: Optional[Dict[str, Any]] = None
-    ) :
-        """显示设备信息并等待用户确认"""
+        user_input: Optional[Dict[str, Any]] = None,
+    ):
         if user_input is not None:
-             return self.async_create_entry(
+            return self.async_create_entry(
                 title=f"{self._device_sn}",
                 data={
                     "host": self._host,
@@ -75,22 +72,40 @@ class AeccLocalPluginConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     "device_type": self._device_type,
                     "device_port": self._device_port,
                     "friendlyName": user_input.get("deviceName", self._device_sn),
-                    # "area_id": area_id
-                }
+                },
             )
 
         return self.async_show_form(
             step_id="confirm_discovery",
             description_placeholders={
-                'sn': self._device_sn,
-                'ip': self._device_ip,
-                'type': self._device_type
+                "sn": self._device_sn,
+                "ip": self._device_ip,
+                "type": self._device_type,
             },
             data_schema=vol.Schema({
                 vol.Required("deviceName"): vol.All(str, vol.Length(min=1, max=64)),
             }),
-            errors={}
+            errors={},
         )
 
 
+class AeccLocalOptionsFlow(config_entries.OptionsFlow):
+    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+        self._entry = config_entry
 
+    async def async_step_init(self, user_input: Dict[str, Any] | None = None):
+        if user_input is not None:
+            return self.async_create_entry(title="", data={
+                CONF_POLL_INTERVAL: user_input[CONF_POLL_INTERVAL],
+            })
+
+        current = self._entry.options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL)
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema({
+                vol.Optional(CONF_POLL_INTERVAL, default=current): vol.All(
+                    vol.Coerce(int),
+                    vol.Range(min=MIN_POLL_INTERVAL, max=MAX_POLL_INTERVAL),
+                ),
+            }),
+        )
