@@ -1,6 +1,7 @@
 import logging
 
 from homeassistant.components.sensor import SensorEntity, SensorDeviceClass, SensorStateClass
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.core import callback
@@ -130,6 +131,9 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
                 sensors.append(
                     AECCEnergySensor(coordinator, device_sn, data_type, api_path, key_suffix, label)
                 )
+
+    sensors.append(AECCLastUpdateSensor(coordinator, device_sn))
+    sensors.append(AECCFailureCountSensor(coordinator, device_sn))
 
     async_add_entities(sensors)
 
@@ -320,5 +324,57 @@ class AECCEnergySensor(CoordinatorEntity, SensorEntity, RestoreEntity):
             "identifiers": {(DOMAIN, self._device_sn)},
             "name": self._device_sn,
             "model": model,
+            "manufacturer": "AECC",
+        }
+
+
+class AECCLastUpdateSensor(CoordinatorEntity, SensorEntity):
+    """Timestamp of the last successful data fetch from the device."""
+
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_has_entity_name = True
+
+    def __init__(self, coordinator, device_sn: str) -> None:
+        super().__init__(coordinator)
+        self._device_sn = device_sn
+        self._attr_unique_id = f"aecc_{device_sn}_last_successful_update"
+        self._attr_name = "Last Successful Update"
+
+    @property
+    def native_value(self):
+        return self.coordinator.last_successful_update
+
+    @property
+    def device_info(self):
+        return {
+            "identifiers": {(DOMAIN, self._device_sn)},
+            "name": self._device_sn,
+            "manufacturer": "AECC",
+        }
+
+
+class AECCFailureCountSensor(CoordinatorEntity, SensorEntity):
+    """Number of consecutive poll failures since the last successful fetch."""
+
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_has_entity_name = True
+
+    def __init__(self, coordinator, device_sn: str) -> None:
+        super().__init__(coordinator)
+        self._device_sn = device_sn
+        self._attr_unique_id = f"aecc_{device_sn}_consecutive_failures"
+        self._attr_name = "Consecutive Poll Failures"
+
+    @property
+    def native_value(self) -> int:
+        return self.coordinator.consecutive_failures
+
+    @property
+    def device_info(self):
+        return {
+            "identifiers": {(DOMAIN, self._device_sn)},
+            "name": self._device_sn,
             "manufacturer": "AECC",
         }
