@@ -6,13 +6,13 @@ Discovers devices via mDNS/Zeroconf and communicates over a persistent local TCP
 
 ## Supported devices
 
-| Device | Data |
-|--------|------|
-| Inverter / Storage (e.g. AFERIY PS420) | Battery SoC, discharge power, total PV power, AC input power |
-| System summary | Total PV, battery, grid, backup, and load power |
-| Smart Plug | Active power |
-| EV Charger | Connector status and power |
-| Hot Water Controller | Power, max power, temperature |
+| Device | Sensors | Control |
+|--------|---------|---------|
+| Inverter / Storage (e.g. AFERIY PS420) | Battery SoC, discharge power, total PV power, AC input power | Operating mode, SOC limits, charge/discharge power |
+| System summary | Total PV, battery, grid, backup, and load power | — |
+| Smart Plug | Active power | On/Off |
+| EV Charger | Connector status and power | On/Off |
+| Hot Water Controller | Power, max power, temperature | On/Off |
 
 ## Installation via HACS
 
@@ -68,6 +68,41 @@ Several fields in the device API are not reliably populated and always report 0 
 As a result of the `BatteryChargingPower` issue, the per-device `<SN> Battery Charge Energy` sensor will always stay at 0 kWh. Use the system-total **Battery Charge Energy** sensor (driven by `TotalChargePower`) for accurate energy tracking.
 
 If you are running a different firmware version and some of these fields work correctly, please [open an issue](https://github.com/vechiato/aecc_local_community/issues).
+
+## Battery control
+
+Inverter/Storage devices expose five control entities in addition to read-only sensors.
+
+### Operating Mode
+
+| Mode | Behaviour |
+|------|-----------|
+| **Self-Gen / Zero Export** | AI self-consumption — the battery decides when to charge and discharge automatically. This is the safe default to return to after manual control. |
+| **Idle** | Battery does nothing — no charging or discharging. |
+| **Charge** | Forces the battery to charge at the **Charge Power** slider value. |
+| **Discharge** | Forces the battery to discharge at the **Discharge Power** slider value. |
+
+Selecting a mode writes up to 6 control registers atomically. The integration verifies the write was accepted by reading the registers back.
+
+### SOC limits
+
+| Entity | Register | Default | Description |
+|--------|----------|---------|-------------|
+| **Discharge Limit** | 3023 | 10% | Battery will not discharge below this SoC |
+| **Charge Limit** | 3024 | 98% | Battery will not charge above this SoC |
+
+Both sliders write to the device immediately on change. On startup the integration reads the current values from the device, so the sliders always reflect actual device state rather than assumed defaults.
+
+### Power targets
+
+| Entity | Default | Description |
+|--------|---------|-------------|
+| **Charge Power** | 800 W | Power applied when Operating Mode → Charge |
+| **Discharge Power** | 800 W | Power applied when Operating Mode → Discharge |
+
+These sliders are passive — they store the target locally and do not send a command to the device by themselves. The power is applied the next time the mode is set to Charge or Discharge.
+
+> **Note:** 800 W is the observed reliable limit for local TCP control. Higher values may work on some devices but are not guaranteed.
 
 ## Configuration options
 

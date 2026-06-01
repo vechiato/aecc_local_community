@@ -131,6 +131,82 @@ class AECCDeviceClient:
     async def turn_off_switch(self, attr) -> bool:
         return await self.send_switch_command(attr,False)
 
+    async def get_control_parameters(self, register_addrs: list) -> Optional[Dict[str, Any]]:
+        """Read control registers from the device."""
+        try:
+            _, writer = await self.tcp_manager.get_reader_writer()
+            request = {
+                "Get": "Energycontrolparameters",
+                "SerialNumber": self.serial_number,
+                "CommandSource": "Web",
+                "RegControlAddr": register_addrs,
+            }
+            writer.write(json.dumps(request).encode() + b'\n')
+            await writer.drain()
+            buffer = b''
+            async with asyncio.timeout(10):
+                while True:
+                    reader, _ = await self.tcp_manager.get_reader_writer()
+                    chunk = await reader.read(4096)
+                    if not chunk:
+                        raise ConnectionResetError("Device closed the connection")
+                    buffer += chunk
+                    try:
+                        json_data = json.loads(buffer.decode('utf-8'))
+                        self.serial_number += 1
+                        return json_data
+                    except json.JSONDecodeError:
+                        await asyncio.sleep(0.1)
+        except (ConnectionResetError, OSError, asyncio.IncompleteReadError) as e:
+            _LOGGER.warning(f"Connection error during get_control_parameters: {e}")
+            await self.tcp_manager.reconnect()
+            return None
+        except TimeoutError:
+            _LOGGER.warning("Timeout waiting for control parameters response")
+            return None
+        except Exception as e:
+            _LOGGER.error(f"Error getting control parameters: {e}", exc_info=True)
+            return None
+
+    async def set_control_parameters(self, register_values: dict) -> Optional[Dict[str, Any]]:
+        """Write control registers to the device."""
+        try:
+            _, writer = await self.tcp_manager.get_reader_writer()
+            request = {
+                "Set": "Energycontrolparameters",
+                "SerialNumber": self.serial_number,
+                "CommandSource": "Web",
+                "SetControlInfo": register_values,
+            }
+            _LOGGER.debug(f"SET control registers: {register_values}")
+            writer.write(json.dumps(request).encode() + b'\n')
+            await writer.drain()
+            buffer = b''
+            async with asyncio.timeout(10):
+                while True:
+                    reader, _ = await self.tcp_manager.get_reader_writer()
+                    chunk = await reader.read(4096)
+                    if not chunk:
+                        raise ConnectionResetError("Device closed the connection")
+                    buffer += chunk
+                    try:
+                        json_data = json.loads(buffer.decode('utf-8'))
+                        _LOGGER.debug(f"SET response: {json_data}")
+                        self.serial_number += 1
+                        return json_data
+                    except json.JSONDecodeError:
+                        await asyncio.sleep(0.1)
+        except (ConnectionResetError, OSError, asyncio.IncompleteReadError) as e:
+            _LOGGER.warning(f"Connection error during set_control_parameters: {e}")
+            await self.tcp_manager.reconnect()
+            return None
+        except TimeoutError:
+            _LOGGER.warning("Timeout waiting for SET control parameters response")
+            return None
+        except Exception as e:
+            _LOGGER.error(f"Error setting control parameters: {e}", exc_info=True)
+            return None
+
     async def disconnect(self):
         """主动关闭连接"""
         await self.tcp_manager.close()
