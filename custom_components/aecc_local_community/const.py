@@ -11,6 +11,28 @@ FAILURE_TOLERANCE = 5
 # How long (seconds) to hold last good data while failures < FAILURE_TOLERANCE
 DATA_HOLD_SECONDS = 120
 
+# ── Control register addresses ────────────────────────────────────────────────
+REG_EMS_ENABLE = "3000"       # 0 = off, 1 = on
+REG_CONTROL_TIME1 = "3003"    # Power/direction time-slot (CSV string)
+REG_SCHEDULE_MODE = "3020"    # 3 = AI self-consumption, 6 = custom schedule
+REG_AI_SMART_CHARGE = "3021"  # 0 = off, 1 = on
+REG_AI_SMART_DISC = "3022"    # 0 = off, 1 = on
+REG_MIN_SOC = "3023"          # Minimum discharge SOC (%)
+REG_MAX_SOC = "3024"          # Maximum charge SOC (%)
+REG_CUSTOM_MODE = "3030"      # 0 = off, 1 = on
+
+# Disabled/idle time slot — clears any active schedule slot
+SLOT_DISABLED = "0,00:00,00:00,0,0,0,0,0,0,100,10"
+
+# ── Work modes ────────────────────────────────────────────────────────────────
+MODE_SELF_CONSUMPTION = "Self-Consumption (AI)"
+MODE_CUSTOM = "Custom / Manual"
+MODE_DISABLED = "Disabled"
+
+# ── Power limits ──────────────────────────────────────────────────────────────
+MAX_CHARGE_POWER_W = 800   # conservative default; increase at your own risk
+MAX_DISCHARGE_POWER_W = 800
+
 DEVICE_TYPE_MAP = [
     (1, 49, "逆变器/离网机/储能机"),
     (50, 54, "电表"),
