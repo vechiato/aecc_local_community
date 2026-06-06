@@ -1,6 +1,8 @@
 import asyncio
 import time
-from datetime import datetime, timedelta
+from collections import deque
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from homeassistant.util import dt as dt_util
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
@@ -19,7 +21,6 @@ from .const import (
     REG_MIN_SOC,
     REG_MAX_SOC,
     MODE_SELF_CONSUMPTION,
-    MODE_CUSTOM,
     SLOT_DISABLED,
 )
 from .cleaners import CleanerContext, DEFAULT_PROFILE, CLEANERS
@@ -33,7 +34,7 @@ _SOC_FIELDS = [
     ("Storage_list", "StorageSN", "BatterySoc"),
 ]
 
-_WRITE_VERIFY_DELAY = 0.5  # seconds between SET and readback
+_WRITE_VERIFY_DELAY = 0.5
 
 
 class AECCDataUpdateCoordinator(DataUpdateCoordinator):
@@ -51,9 +52,11 @@ class AECCDataUpdateCoordinator(DataUpdateCoordinator):
         self._consecutive_failures: int = 0
         self._last_good_data: dict | None = None
         self._last_good_time: datetime | None = None
+        self.last_failed_update: datetime | None = None
+        self.last_failure_reason: str | None = None
         self._cleaner_state: dict = {}
 
-        # Control state — reflects the last commanded values
+        # Control state
         self._commanded_min_soc: int = 10
         self._commanded_max_soc: int = 98
         self._commanded_direction: str = "Idle"
@@ -65,6 +68,9 @@ class AECCDataUpdateCoordinator(DataUpdateCoordinator):
         self.initial_min_soc: int | None = None
         self.initial_max_soc: int | None = None
 
+        # Rolling audit trail of control writes (last 20)
+        self._write_history: deque[dict[str, Any]] = deque(maxlen=20)
+
     # ── Diagnostic properties ─────────────────────────────────────────────────
 
     @property
@@ -74,6 +80,14 @@ class AECCDataUpdateCoordinator(DataUpdateCoordinator):
     @property
     def last_successful_update(self) -> datetime | None:
         return self._last_good_time
+
+    @property
+    def write_history(self) -> list[dict[str, Any]]:
+        return list(self._write_history)
+
+    @property
+    def latest_write(self) -> dict[str, Any] | None:
+        return self._write_history[-1] if self._write_history else None
 
     # ── SOC cleaning ──────────────────────────────────────────────────────────
 
@@ -172,9 +186,12 @@ class AECCDataUpdateCoordinator(DataUpdateCoordinator):
             self._consecutive_failures = 0
             self._last_good_data = data
             self._last_good_time = dt_util.utcnow()
+            self.last_failure_reason = None
             return data
 
         self._consecutive_failures += 1
+        self.last_failed_update = datetime.now(UTC)
+        self.last_failure_reason = "no response from device"
 
         if (
             self._last_good_data is not None
@@ -204,9 +221,61 @@ class AECCDataUpdateCoordinator(DataUpdateCoordinator):
 
     # ── Register write helpers ────────────────────────────────────────────────
 
-    async def _write_registers(self, payload: dict[str, str], operation: str) -> bool:
-        """Write a set of control registers and optionally verify the write."""
+    async def _verify_write(
+        self,
+        expected: dict[str, str],
+        operation: str,
+    ) -> list[dict[str, Any]] | None:
+        """Re-read registers after a write and warn on mismatch."""
+        try:
+            reg_addrs = [int(k) for k in expected.keys() if k != REG_CONTROL_TIME1]
+            if not reg_addrs:
+                return None
+            resp = await self.client.get_control_parameters(reg_addrs)
+            if resp is None:
+                return None
+            params = resp.get("ControlInfo") or resp.get("GetParameters") or {}
+            if not isinstance(params, dict):
+                return None
+            results: list[dict[str, Any]] = []
+            for reg, expected_val in expected.items():
+                if reg == REG_CONTROL_TIME1:
+                    _LOGGER.debug(
+                        "Write verify %s: reg %s = %r (expected %r, log-only)",
+                        operation, reg,
+                        params.get(reg) or params.get(int(reg)),
+                        expected_val,
+                    )
+                    results.append({"register": reg, "expected": expected_val,
+                                    "actual": params.get(reg), "match": None})
+                    continue
+                actual = params.get(reg) or params.get(int(reg))
+                match = str(actual).strip() == str(expected_val).strip() if actual is not None else None
+                if match is False:
+                    _LOGGER.warning(
+                        "Write verify mismatch for %s: reg %s expected %r, got %r",
+                        operation, reg, expected_val, actual,
+                    )
+                results.append({"register": reg, "expected": expected_val,
+                                 "actual": actual, "match": match})
+            return results
+        except Exception as e:
+            _LOGGER.debug("Write verify for %s failed: %s", operation, e)
+            return None
+
+    async def _logged_write(self, payload: dict[str, str], operation: str) -> bool:
+        """Send a register write, record it in the audit trail, and verify."""
+        entry: dict[str, Any] = {
+            "timestamp": datetime.now(UTC).isoformat(),
+            "operation": operation,
+            "payload": dict(payload),
+            "response_received": False,
+            "verify_result": None,
+        }
+        self._write_history.append(entry)
+
         resp = await self.client.set_control_parameters(payload)
+        entry["response_received"] = resp is not None
         if resp is None:
             _LOGGER.warning("SET %s — no response from device", operation)
             return False
@@ -214,28 +283,13 @@ class AECCDataUpdateCoordinator(DataUpdateCoordinator):
         _LOGGER.debug("SET %s response: %s", operation, resp)
 
         await asyncio.sleep(_WRITE_VERIFY_DELAY)
+        entry["verify_result"] = await self._verify_write(payload, operation)
 
-        try:
-            reg_addrs = [int(k) for k in payload.keys() if k != REG_CONTROL_TIME1]
-            if reg_addrs:
-                verify = await self.client.get_control_parameters(reg_addrs)
-                if verify:
-                    params = (
-                        verify.get("ControlInfo")
-                        or verify.get("GetParameters")
-                        or {}
-                    )
-                    for reg, expected in payload.items():
-                        if reg == REG_CONTROL_TIME1:
-                            continue
-                        actual = params.get(reg) or params.get(int(reg))
-                        if actual is not None and str(actual).strip() != str(expected).strip():
-                            _LOGGER.warning(
-                                "Write verify mismatch for %s: register %s expected %r, got %r",
-                                operation, reg, expected, actual,
-                            )
-        except Exception as e:
-            _LOGGER.debug("Write verify for %s failed: %s", operation, e)
+        if entry["verify_result"] and any(
+            item.get("match") is False for item in entry["verify_result"]
+        ):
+            _LOGGER.warning("SET %s failed write-back verification", operation)
+            return False
 
         return True
 
@@ -243,16 +297,15 @@ class AECCDataUpdateCoordinator(DataUpdateCoordinator):
 
     async def async_set_min_soc(self, value: int) -> bool:
         self._commanded_min_soc = value
-        return await self._write_registers({REG_MIN_SOC: str(value)}, f"min_soc({value}%)")
+        return await self._logged_write({REG_MIN_SOC: str(value)}, f"min_soc({value}%)")
 
     async def async_set_max_soc(self, value: int) -> bool:
         self._commanded_max_soc = value
-        return await self._write_registers({REG_MAX_SOC: str(value)}, f"max_soc({value}%)")
+        return await self._logged_write({REG_MAX_SOC: str(value)}, f"max_soc({value}%)")
 
     async def async_set_battery_control(self, direction: str, power_w: int) -> bool:
         has_storage = bool(self.data and self.data.get("Storage_list"))
         field7 = 5 if has_storage else 4
-
         charge_soc = self._commanded_max_soc
         discharge_soc = self._commanded_min_soc
 
@@ -276,7 +329,7 @@ class AECCDataUpdateCoordinator(DataUpdateCoordinator):
             direction, power_w, slot1,
         )
 
-        success = await self._write_registers(payload, f"battery_control({direction}, {power_w}W)")
+        success = await self._logged_write(payload, f"battery_control({direction}, {power_w}W)")
         if success:
             self._commanded_direction = direction
             if direction == "Charge" and power_w > 0:
@@ -287,10 +340,7 @@ class AECCDataUpdateCoordinator(DataUpdateCoordinator):
 
     async def async_restore_self_consumption(self) -> bool:
         """Return battery to AI self-consumption mode (schedule-3 pattern)."""
-        clear_payload = {
-            REG_CONTROL_TIME1: SLOT_DISABLED,
-            REG_CUSTOM_MODE: "0",
-        }
+        clear_payload = {REG_CONTROL_TIME1: SLOT_DISABLED, REG_CUSTOM_MODE: "0"}
         restore_payload = {
             REG_EMS_ENABLE: "1",
             REG_SCHEDULE_MODE: "3",
@@ -301,9 +351,9 @@ class AECCDataUpdateCoordinator(DataUpdateCoordinator):
         }
 
         for attempt in range(1, 4):
-            await self._write_registers(clear_payload, f"self_consumption(clear #{attempt})")
+            await self._logged_write(clear_payload, f"self_consumption(clear #{attempt})")
             await asyncio.sleep(0.75)
-            ok = await self._write_registers(restore_payload, f"self_consumption(restore #{attempt})")
+            ok = await self._logged_write(restore_payload, f"self_consumption(restore #{attempt})")
             if ok:
                 self._commanded_direction = "Idle"
                 self.commanded_operating_mode = "Self-Gen/Zero Export"
