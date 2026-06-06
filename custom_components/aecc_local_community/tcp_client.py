@@ -34,23 +34,28 @@ class AECCDeviceClient:
             _LOGGER.info(f"Sent request: {request}")
 
             buffer = b''
-            while True:
-                reader, _ = await self.tcp_manager.get_reader_writer()
-                chunk = await reader.read(4096)
-                if not chunk:
-                    raise ConnectionResetError("Device closed the connection")
-                buffer += chunk
-                try:
-                    json_data = json.loads(buffer.decode('utf-8'))
-                    _LOGGER.info(f"Received raw response: {json_data}")
-                    self.serial_number += 1
-                    return json_data
-                except json.JSONDecodeError:
-                    await asyncio.sleep(0.1)  # 继续等待更多数据
+            async with asyncio.timeout(10):
+                while True:
+                    reader, _ = await self.tcp_manager.get_reader_writer()
+                    chunk = await reader.read(4096)
+                    if not chunk:
+                        raise ConnectionResetError("Device closed the connection")
+                    buffer += chunk
+                    try:
+                        json_data = json.loads(buffer.decode('utf-8'))
+                        _LOGGER.debug(f"Received raw response keys: {list(json_data.keys()) if isinstance(json_data, dict) else type(json_data)}")
+                        self.serial_number += 1
+                        return json_data
+                    except json.JSONDecodeError:
+                        await asyncio.sleep(0.1)
 
         except (ConnectionResetError, OSError, asyncio.IncompleteReadError) as e:
-            _LOGGER.warning(f"Connection error during fetch_data: {e}, reconnecting...")
+            _LOGGER.warning(f"Connection error during fetch_data: {e}, reconnecting after 2s cooldown...")
+            await asyncio.sleep(2)
             await self.tcp_manager.reconnect()
+            return None
+        except TimeoutError:
+            _LOGGER.warning("Timeout waiting for EnergyParameter response")
             return None
         except Exception as e:
             _LOGGER.error(f"Error fetching data from AECC device: {e}", exc_info=True)
@@ -118,7 +123,8 @@ class AECCDeviceClient:
                 return False
 
         except (ConnectionResetError, OSError, asyncio.IncompleteReadError) as e:
-            _LOGGER.warning(f"Connection error during send_switch_command: {e}, reconnecting...")
+            _LOGGER.warning(f"Connection error during send_switch_command: {e}, reconnecting after 2s cooldown...")
+            await asyncio.sleep(2)
             await self.tcp_manager.reconnect()
             return False
         except Exception as e:
@@ -158,7 +164,8 @@ class AECCDeviceClient:
                     except json.JSONDecodeError:
                         await asyncio.sleep(0.1)
         except (ConnectionResetError, OSError, asyncio.IncompleteReadError) as e:
-            _LOGGER.warning(f"Connection error during get_control_parameters: {e}")
+            _LOGGER.warning(f"Connection error during get_control_parameters: {e}, reconnecting after 2s cooldown...")
+            await asyncio.sleep(2)
             await self.tcp_manager.reconnect()
             return None
         except TimeoutError:
@@ -197,7 +204,8 @@ class AECCDeviceClient:
                     except json.JSONDecodeError:
                         await asyncio.sleep(0.1)
         except (ConnectionResetError, OSError, asyncio.IncompleteReadError) as e:
-            _LOGGER.warning(f"Connection error during set_control_parameters: {e}")
+            _LOGGER.warning(f"Connection error during set_control_parameters: {e}, reconnecting after 2s cooldown...")
+            await asyncio.sleep(2)
             await self.tcp_manager.reconnect()
             return None
         except TimeoutError:
