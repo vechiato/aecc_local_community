@@ -127,12 +127,23 @@ These sensors are hidden by default — enable them under the device's entity li
 
 ## HA diagnostics download
 
-The integration supports the standard Home Assistant diagnostics download. Go to **Settings → Devices & Services → AECC Local (Community) → ⋮ → Download diagnostics** to get a redacted snapshot of the integration state (host, IP, and serial number are omitted).
+Go to **Settings → Devices & Services → AECC Local (Community) → ⋮ → Download diagnostics** to get a full redacted snapshot including:
+
+- Integration version and device identity (host, IP, and serial number redacted)
+- Live coordinator state — commanded mode, SOC limits, failure reason, consecutive failures
+- SOC cleaner state — last accepted values and timestamps
+- Last raw poll response
+- Fresh control-register dump (registers 3000–3130 read at download time)
+- Last 20 control writes with payloads and per-register verify outcomes
+
+This makes it easy to diagnose silent register drops or mode changes not sticking without needing shell access to the device.
 
 ## Reliability
 
 - **Failure tolerance**: the integration holds the last known values for up to 5 consecutive poll failures (or 120 seconds) before marking entities unavailable. Transient network dropouts no longer cause flapping.
 - **SOC cleaning**: battery state-of-charge readings are validated against observable physics. Readings of 0% during active charge or discharge cycles, and impossible rate-of-change jumps, are rejected and replaced with the last accepted value.
+- **Write verification**: every control register write is verified by reading the register back after 0.5 seconds. Mismatches are logged as warnings. All writes are recorded in a rolling audit trail (last 20) visible in the diagnostics download.
+- **Connection resilience**: a 2-second cooldown is applied before reconnecting after any TCP error, preventing rapid reconnect loops that can confuse some devices.
 
 ## Notes
 
