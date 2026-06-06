@@ -84,14 +84,21 @@ class AECCOperatingModeSelect(CoordinatorEntity, SelectEntity, RestoreEntity):
 
         if option == OPERATING_MODE_SELF_GEN:
             success = await self.coordinator.async_restore_self_consumption()
-            if not success:
+            if success:
+                self.coordinator._commanded_direction = "Idle"
+                self.coordinator.commanded_operating_mode = OPERATING_MODE_SELF_GEN
+                self.coordinator.async_set_updated_data(self.coordinator.data or {})
+                self.async_write_ha_state()
+            else:
                 _LOGGER.error("Failed to restore self-consumption mode")
             return
 
         if option == "Idle":
             success = await self.coordinator.async_set_battery_control("Idle", 0)
             if success:
+                self.coordinator._commanded_direction = "Idle"
                 self.coordinator.commanded_operating_mode = "Idle"
+                self.coordinator.async_set_updated_data(self.coordinator.data or {})
                 self.async_write_ha_state()
             else:
                 _LOGGER.error("Failed to set Idle mode")
@@ -101,7 +108,10 @@ class AECCOperatingModeSelect(CoordinatorEntity, SelectEntity, RestoreEntity):
             power = _clamp(int(self.coordinator.commanded_charge_power or 800), 100, 1200)
             success = await self.coordinator.async_set_battery_control("Charge", power)
             if success:
+                self.coordinator._commanded_direction = "Charge"
+                self.coordinator.commanded_charge_power = power
                 self.coordinator.commanded_operating_mode = "Charge"
+                self.coordinator.async_set_updated_data(self.coordinator.data or {})
                 self.async_write_ha_state()
             else:
                 _LOGGER.error("Failed to set Charge mode")
@@ -111,7 +121,10 @@ class AECCOperatingModeSelect(CoordinatorEntity, SelectEntity, RestoreEntity):
             power = _clamp(int(self.coordinator.commanded_discharge_power or 800), 100, 1200)
             success = await self.coordinator.async_set_battery_control("Discharge", power)
             if success:
+                self.coordinator._commanded_direction = "Discharge"
+                self.coordinator.commanded_discharge_power = power
                 self.coordinator.commanded_operating_mode = "Discharge"
+                self.coordinator.async_set_updated_data(self.coordinator.data or {})
                 self.async_write_ha_state()
             else:
                 _LOGGER.error("Failed to set Discharge mode")

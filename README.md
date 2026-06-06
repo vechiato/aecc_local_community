@@ -82,7 +82,7 @@ Inverter/Storage devices expose five control entities in addition to read-only s
 | **Charge** | Forces the battery to charge at the **Charge Power** slider value. |
 | **Discharge** | Forces the battery to discharge at the **Discharge Power** slider value. |
 
-Selecting a mode writes up to 6 control registers atomically. The integration verifies the write was accepted by reading the registers back.
+Selecting a mode writes up to 6 control registers atomically. The integration verifies the write was accepted by reading the registers back. On success, all coordinator state variables are updated immediately and pushed to all listening entities — no need to wait for the next poll.
 
 ### SOC limits
 
