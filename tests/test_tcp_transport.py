@@ -132,6 +132,50 @@ async def test_wifi_rssi_unsupported_device_times_out_quickly():
     server.close()
 
 
+async def test_restart_datalogger_drop_is_success_and_reconnects():
+    seen = []
+
+    async def handler(q, w):
+        req = await q.get()
+        seen.append(req)
+        if req.get("Set") == "DeviceManagement":
+            w.close()  # logger reboots without replying
+            return
+        w.write(reply(req))
+        await w.drain()
+        await asyncio.sleep(1)
+
+    server, port, conns = await serve(handler)
+    c = tcp_client.AECCDeviceClient("127.0.0.1", port)
+    assert await c.restart_datalogger() is True
+    assert seen[0]["DeviceManagementAddr"] == {"32": "1"}, seen[0]
+    assert c.tcp_manager.writer is None  # socket released
+    assert (await c.fetch_data())["Echo"] == "EnergyParameter"
+    assert len(conns) == 2  # next poll opened a fresh socket
+    await c.disconnect()
+    server.close()
+
+
+async def test_restart_datalogger_with_reply():
+    async def handler(q, w):
+        req = await q.get()
+        w.write(reply(req, Result="succeed"))
+        await w.drain()
+        await asyncio.sleep(1)
+
+    server, port, _ = await serve(handler)
+    c = tcp_client.AECCDeviceClient("127.0.0.1", port)
+    assert await c.restart_datalogger() is True
+    assert c.tcp_manager.writer is None
+    server.close()
+
+
+async def test_restart_datalogger_unreachable():
+    tcp_manager.TCPClientManager._connections.clear()
+    c = tcp_client.AECCDeviceClient("127.0.0.1", 1)
+    assert await c.restart_datalogger() is False
+
+
 def test_backoff():
     m = tcp_manager.TCPClientManager("h", 1)
     seen = []
