@@ -148,7 +148,8 @@ This makes it easy to diagnose silent register drops or mode changes not stickin
 - **Missing units show unavailable**: a battery unit absent from the device's report shows as unavailable instead of dropping to 0. Its entities are kept; delete them manually if the unit was permanently removed.
 - **Restart during a reporting gap**: if Home Assistant starts while a unit is temporarily missing, its known sensors are restored from the entity registry and resume when the unit reports again, with no reload needed.
 - **Write verification**: every control register write is verified by reading the register back after 0.5 seconds. Mismatches are logged as warnings. All writes are recorded in a rolling audit trail (last 20) visible in the diagnostics download.
-- **Connection resilience**: a 2-second cooldown is applied before reconnecting after any TCP error, preventing rapid reconnect loops that can confuse some devices.
+- **Connection resilience**: after a TCP error the integration waits before reconnecting, starting at 2 seconds and doubling up to 60 seconds during a sustained outage, then back to 2 seconds once the device answers. The old socket is always closed before a new one opens, since some firmware only serves one client at a time. After 3 requests in a row get no reply, the socket is assumed dead and replaced.
+- **One request at a time**: polls and control writes share one socket and take turns, so they can't read each other's replies. Each reply is matched to its request by serial number, and a late reply to an earlier request is discarded instead of being taken as the answer to the next one.
 
 ## Notes
 
