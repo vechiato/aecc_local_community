@@ -67,6 +67,61 @@ DEFAULT_PROFILE: dict[str, Any] = {
     "soc_max_rate_pct_per_min": 8.0,
 }
 
+# ── Storage_list frame checks ─────────────────────────────────────────────────
+# The gateway can briefly return a frame where a battery unit is missing, the
+# whole Storage_list is empty, or an online unit reports 0% SOC at startup.
+
+
+def storage_units(data: dict | None) -> dict[str, dict]:
+    """Storage_list entries keyed by StorageSN (entries without an SN are skipped)."""
+    units = (data or {}).get("Storage_list") or []
+    return {
+        str(u["StorageSN"]): u
+        for u in units
+        if isinstance(u, dict) and u.get("StorageSN")
+    }
+
+
+def _as_float(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def startup_zero_soc(data: dict) -> bool:
+    """True if any unit that isn't reported offline (StorageStatus 0) shows 0% SOC."""
+    for unit in (data.get("Storage_list") or []):
+        if not isinstance(unit, dict):
+            continue
+        if _as_float(unit.get("BatterySoc")) == 0 and _as_float(unit.get("StorageStatus")) != 0:
+            return True
+    return False
+
+
+def frame_suspect_reason(data: dict, last_good: dict | None) -> str | None:
+    """Why this frame looks like a partial snapshot, or None if it looks complete."""
+    last = storage_units(last_good)
+    if not last:
+        return None
+    new = storage_units(data)
+    if not new:
+        return "Storage_list empty after previously reporting battery units"
+    # Count only: this string lands in diagnostics, where StorageSN is redacted.
+    missing = len(set(last) - set(new))
+    if missing:
+        return f"{missing} of {len(last)} unit(s) missing from Storage_list"
+    return None
+
+
+def fill_missing_soc(data: dict, last_good: dict | None) -> None:
+    """Carry a unit's last BatterySoc forward when a poll omits just that field."""
+    last = storage_units(last_good)
+    for sn, unit in storage_units(data).items():
+        if unit.get("BatterySoc") is None and last.get(sn, {}).get("BatterySoc") is not None:
+            unit["BatterySoc"] = last[sn]["BatterySoc"]
+
+
 # Map canonical field name → cleaner function.
 # Fields absent from this map are passed through unfiltered.
 CLEANERS: dict[str, Any] = {

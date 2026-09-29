@@ -1,6 +1,7 @@
 import logging
 
 from homeassistant.components.sensor import SensorEntity, SensorDeviceClass, SensorStateClass
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers.restore_state import RestoreEntity
@@ -132,10 +133,57 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
                     AECCEnergySensor(coordinator, device_sn, data_type, api_path, key_suffix, label)
                 )
 
+    sensors.extend(_restore_missing_storage_sensors(hass, config_entry, coordinator, device_sn))
+
     sensors.append(AECCLastUpdateSensor(coordinator, device_sn))
     sensors.append(AECCFailureCountSensor(coordinator, device_sn))
 
     async_add_entities(sensors)
+
+
+def _restore_missing_storage_sensors(hass, config_entry, coordinator, device_sn):
+    """Recreate registered battery-unit sensors absent from the first poll.
+
+    If HA restarts while the gateway omits a unit, that unit's entities would
+    otherwise not be created until the next reload.
+    """
+    prefix = f"aecc_{device_sn}_storage_list_"
+    field_map = SENSOR_MAP["Storage_list"]
+    energy_defs = {d[0]: d for d in ENERGY_SENSOR_DEFS if d[1] == "Storage_list"}
+    # Longest first so e.g. "battery_charging_power" wins over a shorter suffix.
+    known_keys = sorted([*field_map, *energy_defs], key=len, reverse=True)
+    present = {
+        str(item.get("StorageSN"))
+        for item in coordinator.data.get("Storage_list") or []
+        if isinstance(item, dict)
+    }
+
+    restored = []
+    registry = er.async_get(hass)
+    for entry in er.async_entries_for_config_entry(registry, config_entry.entry_id):
+        if entry.domain != "sensor" or not entry.unique_id.startswith(prefix):
+            continue
+        rest = entry.unique_id[len(prefix):]
+        key = next((k for k in known_keys if rest.endswith(f"_{k}")), None)
+        if key is None:
+            continue
+        sn = rest[: -len(key) - 1]
+        if not sn or sn in present:
+            continue
+        if key in field_map:
+            path, unit = field_map[key]
+            restored.append(
+                AECCSensor(coordinator, device_sn, {"StorageSN": sn}, "Storage_list", key, path, unit)
+            )
+        else:
+            _, data_type, api_path, label = energy_defs[key]
+            restored.append(
+                AECCEnergySensor(coordinator, device_sn, data_type, api_path, key, label, sn=sn)
+            )
+
+    if restored:
+        _LOGGER.info("Restored %d sensor(s) for battery units missing at startup", len(restored))
+    return restored
 
 
 class AECCSensor(CoordinatorEntity, SensorEntity):
@@ -182,6 +230,14 @@ class AECCSensor(CoordinatorEntity, SensorEntity):
     @property
     def unique_id(self):
         return self._unique_id
+
+    @property
+    def available(self):
+        # A unit missing from a list shows unavailable rather than 0.
+        raw = self.coordinator.data.get(self._data_type) if self.coordinator.data else None
+        if isinstance(raw, list) and not self._get_current_item():
+            return False
+        return super().available
 
     @property
     def native_value(self):

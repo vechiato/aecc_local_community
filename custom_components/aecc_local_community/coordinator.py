@@ -23,7 +23,14 @@ from .const import (
     MODE_SELF_CONSUMPTION,
     SLOT_DISABLED,
 )
-from .cleaners import CleanerContext, DEFAULT_PROFILE, CLEANERS
+from .cleaners import (
+    CleanerContext,
+    DEFAULT_PROFILE,
+    CLEANERS,
+    fill_missing_soc,
+    frame_suspect_reason,
+    startup_zero_soc,
+)
 from .tcp_client import AECCDeviceClient
 import logging
 
@@ -35,6 +42,13 @@ _SOC_FIELDS = [
 ]
 
 _WRITE_VERIFY_DELAY = 0.5
+
+# Hold a partial Storage_list frame this many polls before accepting it as a
+# real change (unit removed/replaced).
+_SUSPECT_FRAME_TOLERANCE = 3
+# Re-polls on startup when an online unit reports 0% SOC (a known glitch).
+_STARTUP_SOC_RETRIES = 3
+_STARTUP_SOC_RETRY_DELAY = 2
 
 
 class AECCDataUpdateCoordinator(DataUpdateCoordinator):
@@ -55,6 +69,9 @@ class AECCDataUpdateCoordinator(DataUpdateCoordinator):
         self.last_failed_update: datetime | None = None
         self.last_failure_reason: str | None = None
         self._cleaner_state: dict = {}
+        self._suspect_streak: int = 0
+        self.suspect_frames_total: int = 0
+        self.last_suspect_reason: str | None = None
 
         # Control state
         self._commanded_min_soc: int = 10
@@ -178,10 +195,49 @@ class AECCDataUpdateCoordinator(DataUpdateCoordinator):
 
         return None
 
+    async def _startup_soc_guard(self, data: dict) -> dict:
+        """Re-poll when the first frame shows an online battery at 0% SOC.
+
+        There's no earlier good frame to hold, so the cleaners can't catch it.
+        If it persists across retries the battery really is empty; accept it.
+        """
+        for attempt in range(1, _STARTUP_SOC_RETRIES + 1):
+            if not startup_zero_soc(data):
+                break
+            _LOGGER.info(
+                "Startup poll reported 0%% SOC for an online battery; re-polling (%d/%d)",
+                attempt, _STARTUP_SOC_RETRIES,
+            )
+            await asyncio.sleep(_STARTUP_SOC_RETRY_DELAY)
+            data = await self._fetch_with_reconnect() or data
+        return data
+
     async def _async_update_data(self):
         data = await self._fetch_with_reconnect()
 
+        if data and self._last_good_data is None:
+            data = await self._startup_soc_guard(data)
+
         if data:
+            reason = frame_suspect_reason(data, self._last_good_data)
+            if reason:
+                self.last_suspect_reason = reason
+                if self._suspect_streak < _SUSPECT_FRAME_TOLERANCE:
+                    self._suspect_streak += 1
+                    self.suspect_frames_total += 1
+                    self._consecutive_failures = 0
+                    _LOGGER.info(
+                        "Holding last good data, suspect frame (%s) %d/%d",
+                        reason, self._suspect_streak, _SUSPECT_FRAME_TOLERANCE,
+                    )
+                    return self._last_good_data
+                _LOGGER.warning(
+                    "Accepting changed battery list after %d suspect polls: %s",
+                    self._suspect_streak, reason,
+                )
+            self._suspect_streak = 0
+
+            fill_missing_soc(data, self._last_good_data)
             data = self._apply_soc_cleaners(data)
             self._consecutive_failures = 0
             self._last_good_data = data
