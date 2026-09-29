@@ -113,6 +113,39 @@ async def test_writes_serialize_and_superseded_verify_is_skipped():
     assert "verify_skipped" not in second and second["verify_result"]
 
 
+class RssiClient:
+    def __init__(self, values):
+        self.values = list(values)
+        self.calls = 0
+
+    async def get_wifi_rssi(self):
+        self.calls += 1
+        return self.values.pop(0)
+
+
+async def test_wifi_rssi_not_refreshed_when_unsupported():
+    c = make()
+    c.client = RssiClient([None])
+    await c.async_probe_wifi_rssi()
+    c._last_rssi_refresh -= 120
+    await c._maybe_refresh_wifi_rssi()
+    assert c.wifi_rssi is None and c.client.calls == 1
+
+
+async def test_wifi_rssi_refresh_throttled_and_keeps_last_on_failure():
+    c = make()
+    c.client = RssiClient([-60, -55, None])
+    await c.async_probe_wifi_rssi()
+    await c._maybe_refresh_wifi_rssi()  # within 60s: skipped
+    assert c.client.calls == 1
+    c._last_rssi_refresh -= 61
+    await c._maybe_refresh_wifi_rssi()
+    assert c.wifi_rssi == -55
+    c._last_rssi_refresh -= 61
+    await c._maybe_refresh_wifi_rssi()  # failed read keeps the last value
+    assert c.wifi_rssi == -55 and c.client.calls == 3
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

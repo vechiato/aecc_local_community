@@ -25,6 +25,7 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> b
 
     # Read min/max SOC from device so sliders reflect actual state
     await coordinator.async_read_initial_state()
+    await coordinator.async_probe_wifi_rssi()
 
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][config_entry.entry_id] = {

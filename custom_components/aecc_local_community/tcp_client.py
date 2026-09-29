@@ -8,6 +8,8 @@ from .tcp_manager import READ_TIMEOUT_SUSPECT_THRESHOLD, TCPClientManager
 _LOGGER = logging.getLogger(__name__)
 
 _REPLY_TIMEOUT = 10  # seconds
+_PROBE_TIMEOUT = 3  # DeviceManagement: some firmware never answers it
+_REG_WIFI_RSSI = 76  # DeviceManagement register: Wi-Fi signal in dBm
 _DECODER = json.JSONDecoder()
 
 
@@ -58,6 +60,30 @@ class AECCDeviceClient:
         _LOGGER.warning("Switch command failed: %s", data)
         return False
 
+    async def get_wifi_rssi(self) -> Optional[int]:
+        """Wi-Fi signal in dBm, or None if the device doesn't report it.
+
+        Only register 76 is requested. The same command also exposes the
+        device's Wi-Fi credentials, which must never be read.
+        """
+        data = await self._request(
+            "Get", "DeviceManagement", {"RegDeviceManagementAddr": [_REG_WIFI_RSSI]},
+            timeout=_PROBE_TIMEOUT, quiet=True,
+        )
+        if not data:
+            return None
+        # Firmware differs on the container key.
+        params = next(
+            (data[k] for k in ("DeviceManagementInfo", "ControlInfo", "Parameters", "GetParameters")
+             if isinstance(data.get(k), dict)),
+            {},
+        )
+        value = params.get(str(_REG_WIFI_RSSI), params.get(_REG_WIFI_RSSI))
+        try:
+            return int(float(str(value).strip()))
+        except (TypeError, ValueError):
+            return None
+
     async def turn_on_switch(self, attr) -> bool:
         return await self.send_switch_command(attr, True)
 
@@ -66,8 +92,14 @@ class AECCDeviceClient:
 
     # ── Transport ─────────────────────────────────────────────────────────────
 
-    async def _request(self, verb: str, command: str, extra: dict | None = None) -> Optional[Dict[str, Any]]:
-        """Send one request and return its reply, or None on any failure."""
+    async def _request(
+        self, verb: str, command: str, extra: dict | None = None,
+        timeout: float = _REPLY_TIMEOUT, quiet: bool = False,
+    ) -> Optional[Dict[str, Any]]:
+        """Send one request and return its reply, or None on any failure.
+
+        quiet: log a missing reply at debug level, for optional probes.
+        """
         mgr = self.tcp_manager
         async with mgr.io_lock:
             # Fresh serial per request, so a late reply to an earlier one is
@@ -78,14 +110,15 @@ class AECCDeviceClient:
                 reader, writer = await mgr.get_reader_writer()
                 writer.write(json.dumps(payload).encode() + b"\n")
                 await writer.drain()
-                reply = await self._read_reply(reader, self.serial_number)
+                reply = await self._read_reply(reader, self.serial_number, timeout)
                 mgr.note_success()
                 return reply
             except _ReadTimeout:
                 mgr.read_timeout_streak += 1
-                _LOGGER.warning(
+                _LOGGER.log(
+                    logging.DEBUG if quiet else logging.WARNING,
                     "%s %s: no reply within %ss (%d in a row)",
-                    verb, command, _REPLY_TIMEOUT, mgr.read_timeout_streak,
+                    verb, command, timeout, mgr.read_timeout_streak,
                 )
                 if mgr.read_timeout_streak >= READ_TIMEOUT_SUSPECT_THRESHOLD:
                     # Likely half-open: close it so the next request reconnects.
@@ -112,7 +145,7 @@ class AECCDeviceClient:
                 _LOGGER.error("%s %s error: %s", verb, command, e, exc_info=True)
                 return None
 
-    async def _read_reply(self, reader: asyncio.StreamReader, expected_serial: int) -> Dict[str, Any]:
+    async def _read_reply(self, reader: asyncio.StreamReader, expected_serial: int, timeout: float) -> Dict[str, Any]:
         """Return the reply matching ``expected_serial``.
 
         Replies are decoded one whole JSON object at a time from a buffer that
@@ -122,7 +155,7 @@ class AECCDeviceClient:
         """
         mgr = self.tcp_manager
         try:
-            async with asyncio.timeout(_REPLY_TIMEOUT):
+            async with asyncio.timeout(timeout):
                 while True:
                     while True:
                         try:

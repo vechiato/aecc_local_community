@@ -12,6 +12,7 @@ from homeassistant.const import (
     UnitOfEnergy,
     UnitOfTemperature,
     PERCENTAGE,
+    SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
 )
 from .const import DOMAIN
 
@@ -137,6 +138,8 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 
     sensors.append(AECCLastUpdateSensor(coordinator, device_sn))
     sensors.append(AECCFailureCountSensor(coordinator, device_sn))
+    if coordinator.wifi_rssi is not None:
+        sensors.append(AECCWifiSignalSensor(coordinator, device_sn))
 
     async_add_entities(sensors)
 
@@ -427,6 +430,34 @@ class AECCFailureCountSensor(CoordinatorEntity, SensorEntity):
     @property
     def native_value(self) -> int:
         return self.coordinator.consecutive_failures
+
+    @property
+    def device_info(self):
+        return {
+            "identifiers": {(DOMAIN, self._device_sn)},
+            "name": self._device_sn,
+            "manufacturer": "AECC",
+        }
+
+
+class AECCWifiSignalSensor(CoordinatorEntity, SensorEntity):
+    """Datalogger Wi-Fi signal strength (DeviceManagement register 76)."""
+
+    _attr_device_class = SensorDeviceClass.SIGNAL_STRENGTH
+    _attr_native_unit_of_measurement = SIGNAL_STRENGTH_DECIBELS_MILLIWATT
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_has_entity_name = True
+
+    def __init__(self, coordinator, device_sn: str) -> None:
+        super().__init__(coordinator)
+        self._device_sn = device_sn
+        self._attr_unique_id = f"aecc_{device_sn}_wifi_rssi"
+        self._attr_name = "Wi-Fi Signal"
+
+    @property
+    def native_value(self):
+        return self.coordinator.wifi_rssi
 
     @property
     def device_info(self):

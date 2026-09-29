@@ -53,6 +53,10 @@ _WRITE_RETRY_DELAY = 1.0
 # newer writes queue behind it.
 _WRITE_RETRY_OUTAGE_STREAK = 3
 
+# Wi-Fi signal changes slowly and costs a separate command, so re-read it well
+# below the poll rate.
+_WIFI_RSSI_REFRESH_SECONDS = 60
+
 # Hold a partial Storage_list frame this many polls before accepting it as a
 # real change (unit removed/replaced).
 _SUSPECT_FRAME_TOLERANCE = 3
@@ -102,6 +106,10 @@ class AECCDataUpdateCoordinator(DataUpdateCoordinator):
         # waiters FIFO, so a re-sent payload can never land after a newer command,
         # and a verify can't read back the next command's value.
         self._write_lock = asyncio.Lock()
+
+        # None until the setup probe reads it; stays None on devices without it.
+        self.wifi_rssi: int | None = None
+        self._last_rssi_refresh: float | None = None
         self._pending_writes = 0
 
     # ── Diagnostic properties ─────────────────────────────────────────────────
@@ -233,6 +241,7 @@ class AECCDataUpdateCoordinator(DataUpdateCoordinator):
             self._last_good_data = data
             self._last_good_time = dt_util.utcnow()
             self.last_failure_reason = None
+            await self._maybe_refresh_wifi_rssi()
             return data
 
         self._consecutive_failures += 1
@@ -454,6 +463,25 @@ class AECCDataUpdateCoordinator(DataUpdateCoordinator):
                 await asyncio.sleep(2)
 
         return False
+
+    async def async_probe_wifi_rssi(self) -> None:
+        """Read the Wi-Fi signal once at setup; refreshes run only if this works."""
+        self.wifi_rssi = await self.client.get_wifi_rssi()
+        self._last_rssi_refresh = time.monotonic()
+        if self.wifi_rssi is None:
+            _LOGGER.debug("Wi-Fi signal not reported by this device; no sensor created")
+
+    async def _maybe_refresh_wifi_rssi(self) -> None:
+        # Devices that didn't answer the setup probe never pay for the command.
+        if self.wifi_rssi is None or self._last_rssi_refresh is None:
+            return
+        now = time.monotonic()
+        if now - self._last_rssi_refresh < _WIFI_RSSI_REFRESH_SECONDS:
+            return
+        self._last_rssi_refresh = now
+        rssi = await self.client.get_wifi_rssi()
+        if rssi is not None:  # a failed read keeps the last value
+            self.wifi_rssi = rssi
 
     async def async_read_initial_state(self) -> None:
         """Read Min/Max SOC from device on startup so sliders reflect actual state."""

@@ -107,6 +107,7 @@ async def async_get_config_entry_diagnostics(
             "initial_max_soc": coordinator.initial_max_soc,
             "suspect_frames_total": coordinator.suspect_frames_total,
             "last_suspect_reason": coordinator.last_suspect_reason,
+            "wifi_rssi_dbm": coordinator.wifi_rssi,
         },
         "cleaner_state": {
             state_key: {
