@@ -1,0 +1,32 @@
+# Publish a GitHub release whenever a merge to main bumps the version in
+# manifest.json. HACS and the repo page show the latest release, not the
+# manifest, so without this a version bump never reaches users.
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths: [custom_components/aecc_local_community/manifest.json]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Create release for the manifest version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(jq -r .version custom_components/aecc_local_community/manifest.json)
+          tag="v$version"
+          # Manifest edits that don't change the version, or a release published
+          # by hand first, are left alone.
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "$tag is already released; nothing to do"
+            exit 0
+          fi
+          gh release create "$tag" --target "$GITHUB_SHA" --title "$tag" --generate-notes --latest
