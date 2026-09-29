@@ -116,12 +116,13 @@ Changes take effect immediately (the integration reloads automatically).
 
 ## Diagnostic entities
 
-Each device exposes two diagnostic sensors to help with troubleshooting:
+Each device exposes these diagnostic sensors to help with troubleshooting:
 
 | Sensor | Description |
 |--------|-------------|
 | Last Successful Update | Timestamp of the most recent successful data fetch |
 | Consecutive Poll Failures | Number of failed polls since the last successful response |
+| Wi-Fi Signal | Datalogger Wi-Fi strength in dBm, refreshed every 60 seconds. Only created if the device reports it at setup; not all AECC firmware does |
 
 These sensors are hidden by default — enable them under the device's entity list if needed.
 
@@ -130,7 +131,7 @@ These sensors are hidden by default — enable them under the device's entity li
 Go to **Settings → Devices & Services → AECC Local (Community) → ⋮ → Download diagnostics** to get a full redacted snapshot including:
 
 - Integration version and device identity (host, IP, and serial number redacted)
-- Live coordinator state — commanded mode, SOC limits, failure reason, consecutive failures
+- Live coordinator state — commanded mode, SOC limits, failure reason, consecutive failures, Wi-Fi signal
 - SOC cleaner state — last accepted values and timestamps
 - Partial-frame counters — how many incomplete battery-list polls were held and the last reason (unit count only, no serials)
 - Last raw poll response

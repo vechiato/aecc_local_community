@@ -98,6 +98,40 @@ async def test_silent_socket_is_recycled():
     server.close()
 
 
+async def test_wifi_rssi():
+    async def handler(q, w):
+        req = await q.get()
+        assert req["RegDeviceManagementAddr"] == [76], req  # never the credential registers
+        w.write(reply(req, ControlInfo={"76": "-61"}))
+        await w.drain()
+        req = await q.get()
+        w.write(reply(req, DeviceManagementInfo={"76": "n/a"}))
+        await w.drain()
+        await asyncio.sleep(1)
+
+    server, port, _ = await serve(handler)
+    c = tcp_client.AECCDeviceClient("127.0.0.1", port)
+    assert await c.get_wifi_rssi() == -61
+    assert await c.get_wifi_rssi() is None  # non-numeric
+    await c.disconnect()
+    server.close()
+
+
+async def test_wifi_rssi_unsupported_device_times_out_quickly():
+    async def handler(q, w):
+        await asyncio.sleep(10)  # firmware that ignores DeviceManagement
+
+    server, port, _ = await serve(handler)
+    tcp_client._PROBE_TIMEOUT = 0.2
+    c = tcp_client.AECCDeviceClient("127.0.0.1", port)
+    start = asyncio.get_running_loop().time()
+    assert await c.get_wifi_rssi() is None
+    assert asyncio.get_running_loop().time() - start < 1
+    tcp_client._PROBE_TIMEOUT = 3
+    await c.disconnect()
+    server.close()
+
+
 def test_backoff():
     m = tcp_manager.TCPClientManager("h", 1)
     seen = []
