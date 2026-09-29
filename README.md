@@ -126,6 +126,12 @@ Each device exposes these diagnostic sensors to help with troubleshooting:
 
 These sensors are hidden by default — enable them under the device's entity list if needed.
 
+### Restart Data Logger
+
+A **Restart Data Logger** button (under the device's configuration entities) reboots the device's Wi-Fi datalogger over the local connection. Use it when the device stops answering polls but is still on the network. Expect the device to be unreachable for a short while as the logger reboots; the integration reconnects on its own.
+
+> **Note:** this command was found on the AFERIY PS240 (from [odryl/Aferiy-PS240-Agile](https://github.com/odryl/Aferiy-PS240-Agile)) and hasn't been confirmed on every AECC device. If pressing it has no effect on yours, please [open an issue](https://github.com/vechiato/aecc_local_community/issues).
+
 ## HA diagnostics download
 
 Go to **Settings → Devices & Services → AECC Local (Community) → ⋮ → Download diagnostics** to get a full redacted snapshot including:
@@ -137,6 +143,7 @@ Go to **Settings → Devices & Services → AECC Local (Community) → ⋮ → D
 - Last raw poll response
 - Fresh control-register dump (registers 3000–3130 read at download time)
 - Last 20 control writes with payloads, attempt counts and per-register verify outcomes
+- Time of the last datalogger restart and whether it was sent
 
 This makes it easy to diagnose silent register drops or mode changes not sticking without needing shell access to the device.
 

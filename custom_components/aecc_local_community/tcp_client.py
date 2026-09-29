@@ -10,6 +10,8 @@ _LOGGER = logging.getLogger(__name__)
 _REPLY_TIMEOUT = 10  # seconds
 _PROBE_TIMEOUT = 3  # DeviceManagement: some firmware never answers it
 _REG_WIFI_RSSI = 76  # DeviceManagement register: Wi-Fi signal in dBm
+_REG_DATALOGGER_RESTART = "32"  # DeviceManagement register: write 1 to reboot the logger
+_RESTART_REPLY_TIMEOUT = 2  # the logger usually drops the socket before replying
 _DECODER = json.JSONDecoder()
 
 
@@ -83,6 +85,38 @@ class AECCDeviceClient:
             return int(float(str(value).strip()))
         except (TypeError, ValueError):
             return None
+
+    async def restart_datalogger(self) -> bool:
+        """Reboot the Wi-Fi datalogger. True once the command was sent.
+
+        The logger usually closes the socket before it can reply, so a missing
+        reply or a reset is expected, not a failure. The socket is always closed
+        afterwards; the next poll reconnects once the logger is back.
+        """
+        mgr = self.tcp_manager
+        async with mgr.io_lock:
+            self.serial_number += 1
+            payload = {
+                "Set": "DeviceManagement",
+                "SerialNumber": self.serial_number,
+                "CommandSource": "Web",
+                "DeviceManagementAddr": {_REG_DATALOGGER_RESTART: "1"},
+            }
+            try:
+                reader, writer = await mgr.get_reader_writer()
+                writer.write(json.dumps(payload).encode() + b"\n")
+                await writer.drain()
+            except OSError as e:
+                _LOGGER.warning("Could not send datalogger restart: %s", e)
+                return False
+            try:
+                reply = await self._read_reply(reader, self.serial_number, _RESTART_REPLY_TIMEOUT)
+                _LOGGER.info("Datalogger restart reply: %s", reply)
+            except (_ReadTimeout, OSError, asyncio.IncompleteReadError):
+                _LOGGER.debug("No reply to datalogger restart (expected while it reboots)")
+            finally:
+                await mgr.close()
+            return True
 
     async def turn_on_switch(self, attr) -> bool:
         return await self.send_switch_command(attr, True)

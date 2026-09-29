@@ -110,6 +110,9 @@ class AECCDataUpdateCoordinator(DataUpdateCoordinator):
         # None until the setup probe reads it; stays None on devices without it.
         self.wifi_rssi: int | None = None
         self._last_rssi_refresh: float | None = None
+
+        self.last_datalogger_restart_at: datetime | None = None
+        self.last_datalogger_restart_sent: bool | None = None
         self._pending_writes = 0
 
     # ── Diagnostic properties ─────────────────────────────────────────────────
@@ -463,6 +466,16 @@ class AECCDataUpdateCoordinator(DataUpdateCoordinator):
                 await asyncio.sleep(2)
 
         return False
+
+    async def async_restart_datalogger(self) -> bool:
+        sent = await self.client.restart_datalogger()
+        self.last_datalogger_restart_at = datetime.now(UTC)
+        self.last_datalogger_restart_sent = sent
+        if sent:
+            _LOGGER.warning("Datalogger restart sent; the device will be unreachable briefly while it reboots")
+        else:
+            _LOGGER.error("Datalogger restart could not be sent")
+        return sent
 
     async def async_probe_wifi_rssi(self) -> None:
         """Read the Wi-Fi signal once at setup; refreshes run only if this works."""
