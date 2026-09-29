@@ -173,30 +173,21 @@ class AECCDataUpdateCoordinator(DataUpdateCoordinator):
 
     # ── Poll ──────────────────────────────────────────────────────────────────
 
-    async def _fetch_with_reconnect(self) -> dict | None:
-        try:
+    async def _fetch_with_retry(self) -> dict | None:
+        # One retry. The client already backs off and reconnects after a
+        # connection error, so reconnecting here too would cost two sockets per
+        # failure.
+        for attempt in (1, 2):
             data = await self.client.fetch_data()
             if data:
                 return dict(data)
-            _LOGGER.warning("No data returned on first attempt, retrying after reconnect...")
-        except (ConnectionError, ConnectionResetError, OSError) as e:
-            _LOGGER.warning("Connection error during fetch_data: %s, attempting reconnect...", e)
-
-        try:
-            await self.client.disconnect()
-            await self.client.connect()
-            _LOGGER.info("Reconnected to AECC device")
-            data = await self.client.fetch_data()
-            if data:
-                return dict(data)
-            _LOGGER.error("No data returned even after reconnect")
-        except Exception as e:
-            _LOGGER.error("Failed to fetch data after reconnect: %s", e)
-
+            if attempt == 1:
+                _LOGGER.warning("No data returned on first attempt, retrying...")
+        _LOGGER.error("No data returned after retry")
         return None
 
     async def _async_update_data(self):
-        data = await self._fetch_with_reconnect()
+        data = await self._fetch_with_retry()
 
         if data:
             reason = frame_suspect_reason(data, self._last_good_data)
