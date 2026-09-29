@@ -77,6 +77,9 @@ class AECCDataUpdateCoordinator(DataUpdateCoordinator):
         self.commanded_operating_mode: str | None = None
         self.commanded_charge_power: int = 800
         self.commanded_discharge_power: int = 800
+        # Power in the slot the battery is running now. Separate from
+        # commanded_*_power, which the passive sliders change without a write.
+        self._active_power_w: int = 0
 
         # Read from device on first setup
         self.initial_min_soc: int | None = None
@@ -322,25 +325,42 @@ class AECCDataUpdateCoordinator(DataUpdateCoordinator):
 
     # ── Control API ───────────────────────────────────────────────────────────
 
+    def _slot_for(self, direction: str, power_w: int) -> str:
+        """Register 3003 slot for a command, carrying the commanded SOC limits.
+
+        The battery enforces the limits inside the active slot, not registers
+        3023/3024, so a limit change during a command must re-send the slot.
+        """
+        charge_soc = self._commanded_max_soc
+        discharge_soc = self._commanded_min_soc
+        if direction == "Idle" or power_w == 0:
+            return f"0,00:00,00:00,0,0,0,0,0,0,{charge_soc},{discharge_soc}"
+        has_storage = bool(self.data and self.data.get("Storage_list"))
+        field7 = 5 if has_storage else 4
+        reg_power = -power_w if direction == "Charge" else power_w
+        return f"1,00:00,23:59,{reg_power},0,6,{field7},0,0,{charge_soc},{discharge_soc}"
+
+    def _active_slot_payload(self) -> dict[str, str]:
+        """The slot to re-send with a limit write, only while Charge/Discharge runs."""
+        if self._commanded_direction in ("Charge", "Discharge") and self._active_power_w > 0:
+            return {REG_CONTROL_TIME1: self._slot_for(self._commanded_direction, self._active_power_w)}
+        return {}
+
+    async def _set_soc_limit(self, register: str, value: int, name: str) -> bool:
+        payload = {register: str(value), **self._active_slot_payload()}
+        suffix = "+slot" if REG_CONTROL_TIME1 in payload else ""
+        return await self._logged_write(payload, f"{name}({value}%){suffix}")
+
     async def async_set_min_soc(self, value: int) -> bool:
         self._commanded_min_soc = value
-        return await self._logged_write({REG_MIN_SOC: str(value)}, f"min_soc({value}%)")
+        return await self._set_soc_limit(REG_MIN_SOC, value, "min_soc")
 
     async def async_set_max_soc(self, value: int) -> bool:
         self._commanded_max_soc = value
-        return await self._logged_write({REG_MAX_SOC: str(value)}, f"max_soc({value}%)")
+        return await self._set_soc_limit(REG_MAX_SOC, value, "max_soc")
 
     async def async_set_battery_control(self, direction: str, power_w: int) -> bool:
-        has_storage = bool(self.data and self.data.get("Storage_list"))
-        field7 = 5 if has_storage else 4
-        charge_soc = self._commanded_max_soc
-        discharge_soc = self._commanded_min_soc
-
-        if direction == "Idle" or power_w == 0:
-            slot1 = f"0,00:00,00:00,0,0,0,0,0,0,{charge_soc},{discharge_soc}"
-        else:
-            reg_power = -power_w if direction == "Charge" else power_w
-            slot1 = f"1,00:00,23:59,{reg_power},0,6,{field7},0,0,{charge_soc},{discharge_soc}"
+        slot1 = self._slot_for(direction, power_w)
 
         payload = {
             REG_EMS_ENABLE: "1",
@@ -359,6 +379,7 @@ class AECCDataUpdateCoordinator(DataUpdateCoordinator):
         success = await self._logged_write(payload, f"battery_control({direction}, {power_w}W)")
         if success:
             self._commanded_direction = direction
+            self._active_power_w = 0 if direction == "Idle" else power_w
             if direction == "Charge" and power_w > 0:
                 self.commanded_charge_power = power_w
             elif direction == "Discharge" and power_w > 0:
@@ -383,6 +404,7 @@ class AECCDataUpdateCoordinator(DataUpdateCoordinator):
             ok = await self._logged_write(restore_payload, f"self_consumption(restore #{attempt})")
             if ok:
                 self._commanded_direction = "Idle"
+                self._active_power_w = 0
                 self.commanded_operating_mode = "Self-Gen/Zero Export"
                 return True
             if attempt < 3:

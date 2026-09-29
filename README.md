@@ -91,7 +91,7 @@ Selecting a mode writes up to 6 control registers atomically. The integration ve
 | **Discharge Limit** | 3023 | 10% | Battery will not discharge below this SoC |
 | **Charge Limit** | 3024 | 98% | Battery will not charge above this SoC |
 
-Both sliders write to the device immediately on change. On startup the integration reads the current values from the device, so the sliders always reflect actual device state rather than assumed defaults.
+Both sliders write to the device immediately on change. On startup the integration reads the current values from the device, so the sliders always reflect actual device state rather than assumed defaults. If you change a limit while Operating Mode is Charge or Discharge, the active command is re-sent with the new limit at the same power, because the battery applies the limits stored with the running command, not the separate limit registers.
 
 ### Power targets
 
