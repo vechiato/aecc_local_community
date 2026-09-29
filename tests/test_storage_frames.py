@@ -17,12 +17,20 @@ A = {"StorageSN": "A", "BatterySoc": 60, "StorageStatus": 1}
 B = {"StorageSN": "B", "BatterySoc": 55, "StorageStatus": 1}
 
 
-def test_startup_zero_soc():
-    assert c.startup_zero_soc(frame({**A, "BatterySoc": 0}))
-    assert c.startup_zero_soc(frame({**A, "BatterySoc": "0", "StorageStatus": None}))
-    assert not c.startup_zero_soc(frame({**A, "BatterySoc": 0, "StorageStatus": 0}))  # offline
-    assert not c.startup_zero_soc(frame(A, B))
-    assert not c.startup_zero_soc({})
+def soc(raw, *, elapsed, last=None, power=0.0):
+    return c.clean_soc(c.CleanerContext(
+        key="k", raw_value=raw, last_accepted_value=last,
+        last_accepted_at=0.0 if last is not None else None, now=elapsed,
+        wall_power_w=power, profile=c.DEFAULT_PROFILE, seconds_since_first_poll=elapsed,
+    ))
+
+
+def test_startup_zero_soc_window():
+    assert soc(0, elapsed=0) is None  # warm-up frame withheld
+    assert soc(0, elapsed=20) is None  # measured warm-up still reporting 0 after several polls
+    assert soc(0, elapsed=60) == 0  # genuinely empty pack publishes after the window
+    assert soc(12, elapsed=0) == 12  # real value accepted immediately
+    assert soc(0, elapsed=30, last=1) == 0  # once a value is accepted, a slow 1%->0% passes
 
 
 def test_frame_suspect_reason():

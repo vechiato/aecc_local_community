@@ -244,7 +244,8 @@ class AECCSensor(CoordinatorEntity, SensorEntity):
         value = self._get_current_item().get(self._path)
         _LOGGER.debug(f"Analysis key {self._path} value：{value}")
         if value is None:
-            return 0.0
+            # SOC withheld by the cleaner (startup warm-up) shows unknown, not 0%.
+            return None if self._unit == PERCENTAGE else 0.0
         try:
             result = float(value)
         except (ValueError, TypeError):
