@@ -135,7 +135,7 @@ Go to **Settings → Devices & Services → AECC Local (Community) → ⋮ → D
 - Partial-frame counters — how many incomplete battery-list polls were held and the last reason (unit count only, no serials)
 - Last raw poll response
 - Fresh control-register dump (registers 3000–3130 read at download time)
-- Last 20 control writes with payloads and per-register verify outcomes
+- Last 20 control writes with payloads, attempt counts and per-register verify outcomes
 
 This makes it easy to diagnose silent register drops or mode changes not sticking without needing shell access to the device.
 
@@ -148,6 +148,7 @@ This makes it easy to diagnose silent register drops or mode changes not stickin
 - **Missing units show unavailable**: a battery unit absent from the device's report shows as unavailable instead of dropping to 0. Its entities are kept; delete them manually if the unit was permanently removed.
 - **Restart during a reporting gap**: if Home Assistant starts while a unit is temporarily missing, its known sensors are restored from the entity registry and resume when the unit reports again, with no reload needed.
 - **Write verification**: every control register write is verified by reading the register back after 0.5 seconds. Mismatches are logged as warnings. All writes are recorded in a rolling audit trail (last 20) visible in the diagnostics download.
+- **Write retries**: a write the device doesn't confirm is re-sent up to 2 more times, which covers the device's periodic connection resets. Retries stop early if the device looks unreachable, so a real outage fails fast. Writes run one at a time in the order they were made, so a re-sent write can never overwrite a newer one. If another write is already waiting, the read-back check for the earlier one is skipped, because it would read the newer value.
 - **Connection resilience**: after a TCP error the integration waits before reconnecting, starting at 2 seconds and doubling up to 60 seconds during a sustained outage, then back to 2 seconds once the device answers. The old socket is always closed before a new one opens, since some firmware only serves one client at a time. After 3 requests in a row get no reply, the socket is assumed dead and replaced.
 - **One request at a time**: polls and control writes share one socket and take turns, so they can't read each other's replies. Each reply is matched to its request by serial number, and a late reply to an earlier request is discarded instead of being taken as the answer to the next one.
 

@@ -42,6 +42,17 @@ _SOC_FIELDS = [
 
 _WRITE_VERIFY_DELAY = 0.5
 
+# Re-sends after an unconfirmed write. The datalogger periodically resets its
+# TCP connection, and a write landing in that window comes back unconfirmed
+# (~2% of writes, measured upstream in StekkerDeal/aecc-battery-local). Control
+# writes are idempotent, so re-sending is safe.
+_WRITE_RETRY_ATTEMPTS = 2
+_WRITE_RETRY_DELAY = 1.0
+# Stop retrying once the connection-failure streak says sustained outage, not a
+# reset blip: each retry would sit through the growing reconnect cooldown while
+# newer writes queue behind it.
+_WRITE_RETRY_OUTAGE_STREAK = 3
+
 # Hold a partial Storage_list frame this many polls before accepting it as a
 # real change (unit removed/replaced).
 _SUSPECT_FRAME_TOLERANCE = 3
@@ -87,6 +98,11 @@ class AECCDataUpdateCoordinator(DataUpdateCoordinator):
 
         # Rolling audit trail of control writes (last 20)
         self._write_history: deque[dict[str, Any]] = deque(maxlen=20)
+        # Serializes whole write sequences (retries + verify). asyncio locks wake
+        # waiters FIFO, so a re-sent payload can never land after a newer command,
+        # and a verify can't read back the next command's value.
+        self._write_lock = asyncio.Lock()
+        self._pending_writes = 0
 
     # ── Diagnostic properties ─────────────────────────────────────────────────
 
@@ -300,17 +316,43 @@ class AECCDataUpdateCoordinator(DataUpdateCoordinator):
             "operation": operation,
             "payload": dict(payload),
             "response_received": False,
+            "attempts": 0,
             "verify_result": None,
         }
         self._write_history.append(entry)
+        self._pending_writes += 1
+        try:
+            async with self._write_lock:
+                return await self._send_and_verify(entry, payload, operation)
+        finally:
+            self._pending_writes -= 1
 
-        resp = await self.client.set_control_parameters(payload)
+    async def _send_and_verify(self, entry: dict[str, Any], payload: dict[str, str], operation: str) -> bool:
+        resp = None
+        for attempt in range(1, _WRITE_RETRY_ATTEMPTS + 2):
+            entry["attempts"] = attempt
+            resp = await self.client.set_control_parameters(payload)
+            if resp is not None or attempt > _WRITE_RETRY_ATTEMPTS:
+                break
+            streak = self.client.tcp_manager.consecutive_failures
+            if streak >= _WRITE_RETRY_OUTAGE_STREAK:
+                _LOGGER.debug("SET %s unconfirmed, device unreachable (streak %d); not retrying", operation, streak)
+                break
+            _LOGGER.info("SET %s unconfirmed; re-sending (retry %d of %d)", operation, attempt, _WRITE_RETRY_ATTEMPTS)
+            await asyncio.sleep(_WRITE_RETRY_DELAY)
+
         entry["response_received"] = resp is not None
         if resp is None:
-            _LOGGER.warning("SET %s — no response from device", operation)
+            _LOGGER.warning("SET %s — no response from device after %d attempt(s)", operation, entry["attempts"])
             return False
 
         _LOGGER.debug("SET %s response: %s", operation, resp)
+
+        if self._pending_writes > 1:
+            # The read-back would describe the queued write, not this one.
+            _LOGGER.debug("SET %s: newer write queued, skipping write-back verify", operation)
+            entry["verify_skipped"] = "superseded"
+            return True
 
         await asyncio.sleep(_WRITE_VERIFY_DELAY)
         entry["verify_result"] = await self._verify_write(payload, operation)
