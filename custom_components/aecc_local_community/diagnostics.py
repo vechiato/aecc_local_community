@@ -105,6 +105,8 @@ async def async_get_config_entry_diagnostics(
             "commanded_discharge_power": coordinator.commanded_discharge_power,
             "initial_min_soc": coordinator.initial_min_soc,
             "initial_max_soc": coordinator.initial_max_soc,
+            "suspect_frames_total": coordinator.suspect_frames_total,
+            "last_suspect_reason": coordinator.last_suspect_reason,
         },
         "cleaner_state": {
             state_key: {

@@ -17,6 +17,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+# How long a SOC of 0 is withheld when there is no accepted value to judge it
+# against. The first frames after a reload can report 0 with every power field
+# also at 0, which no physics check can contradict. Warm-up measured upstream
+# (StekkerDeal/aecc-battery-local) is 15-20s. Publishing the 0 is the costly
+# mistake: it becomes the rate-check baseline and suppresses the true value for
+# over a minute. A genuinely empty pack publishes 0 once the window passes.
+SOC_ZERO_WARMUP_SECONDS = 60.0
+
 
 @dataclass
 class CleanerContext:
@@ -27,6 +35,7 @@ class CleanerContext:
     now: float                       # time.monotonic() of current poll
     wall_power_w: float | None       # total battery activity power (abs used only)
     profile: dict[str, Any]
+    seconds_since_first_poll: float | None = None  # None before the first valid frame
 
 
 def clean_soc(ctx: CleanerContext) -> float | None:
@@ -45,6 +54,11 @@ def clean_soc(ctx: CleanerContext) -> float | None:
 
     if raw == 0 and ctx.wall_power_w is not None and abs(ctx.wall_power_w) > threshold_w:
         return None
+
+    if raw == 0 and ctx.last_accepted_value is None:
+        elapsed = ctx.seconds_since_first_poll
+        if elapsed is None or elapsed < SOC_ZERO_WARMUP_SECONDS:
+            return None
 
     if (
         ctx.last_accepted_value is not None
@@ -66,6 +80,44 @@ DEFAULT_PROFILE: dict[str, Any] = {
     "soc_zero_reject_during_active_w": 100,
     "soc_max_rate_pct_per_min": 8.0,
 }
+
+# ── Storage_list frame checks ─────────────────────────────────────────────────
+# The gateway can briefly return a frame where a battery unit is missing or
+# the whole Storage_list is empty.
+
+
+def storage_units(data: dict | None) -> dict[str, dict]:
+    """Storage_list entries keyed by StorageSN (entries without an SN are skipped)."""
+    units = (data or {}).get("Storage_list") or []
+    return {
+        str(u["StorageSN"]): u
+        for u in units
+        if isinstance(u, dict) and u.get("StorageSN")
+    }
+
+
+def frame_suspect_reason(data: dict, last_good: dict | None) -> str | None:
+    """Why this frame looks like a partial snapshot, or None if it looks complete."""
+    last = storage_units(last_good)
+    if not last:
+        return None
+    new = storage_units(data)
+    if not new:
+        return "Storage_list empty after previously reporting battery units"
+    # Count only: this string lands in diagnostics, where StorageSN is redacted.
+    missing = len(set(last) - set(new))
+    if missing:
+        return f"{missing} of {len(last)} unit(s) missing from Storage_list"
+    return None
+
+
+def fill_missing_soc(data: dict, last_good: dict | None) -> None:
+    """Carry a unit's last BatterySoc forward when a poll omits just that field."""
+    last = storage_units(last_good)
+    for sn, unit in storage_units(data).items():
+        if unit.get("BatterySoc") is None and last.get(sn, {}).get("BatterySoc") is not None:
+            unit["BatterySoc"] = last[sn]["BatterySoc"]
+
 
 # Map canonical field name → cleaner function.
 # Fields absent from this map are passed through unfiltered.

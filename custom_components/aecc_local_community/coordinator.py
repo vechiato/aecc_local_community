@@ -23,7 +23,13 @@ from .const import (
     MODE_SELF_CONSUMPTION,
     SLOT_DISABLED,
 )
-from .cleaners import CleanerContext, DEFAULT_PROFILE, CLEANERS
+from .cleaners import (
+    CleanerContext,
+    DEFAULT_PROFILE,
+    CLEANERS,
+    fill_missing_soc,
+    frame_suspect_reason,
+)
 from .tcp_client import AECCDeviceClient
 import logging
 
@@ -35,6 +41,10 @@ _SOC_FIELDS = [
 ]
 
 _WRITE_VERIFY_DELAY = 0.5
+
+# Hold a partial Storage_list frame this many polls before accepting it as a
+# real change (unit removed/replaced).
+_SUSPECT_FRAME_TOLERANCE = 3
 
 
 class AECCDataUpdateCoordinator(DataUpdateCoordinator):
@@ -55,6 +65,10 @@ class AECCDataUpdateCoordinator(DataUpdateCoordinator):
         self.last_failed_update: datetime | None = None
         self.last_failure_reason: str | None = None
         self._cleaner_state: dict = {}
+        self._first_poll_at: float | None = None  # monotonic; for the SOC warm-up window
+        self._suspect_streak: int = 0
+        self.suspect_frames_total: int = 0
+        self.last_suspect_reason: str | None = None
 
         # Control state
         self._commanded_min_soc: int = 10
@@ -104,6 +118,8 @@ class AECCDataUpdateCoordinator(DataUpdateCoordinator):
 
     def _apply_soc_cleaners(self, data: dict) -> dict:
         now = time.monotonic()
+        if self._first_poll_at is None:
+            self._first_poll_at = now
         wall_power = self._get_wall_power(data)
 
         for data_type, sn_key, field in _SOC_FIELDS:
@@ -135,6 +151,7 @@ class AECCDataUpdateCoordinator(DataUpdateCoordinator):
                     now=now,
                     wall_power_w=wall_power,
                     profile=DEFAULT_PROFILE,
+                    seconds_since_first_poll=now - self._first_poll_at,
                 )
                 result = cleaner(ctx)
                 if result is None:
@@ -143,8 +160,8 @@ class AECCDataUpdateCoordinator(DataUpdateCoordinator):
                         field, raw_val, sn,
                         state.get("last_accepted_value", float("nan")),
                     )
-                    if state.get("last_accepted_value") is not None:
-                        item[field] = state["last_accepted_value"]
+                    # Nothing accepted yet (startup warm-up): publish unknown, not the 0.
+                    item[field] = state.get("last_accepted_value")
                 else:
                     self._cleaner_state[state_key] = {
                         "last_accepted_value": result,
@@ -182,6 +199,25 @@ class AECCDataUpdateCoordinator(DataUpdateCoordinator):
         data = await self._fetch_with_reconnect()
 
         if data:
+            reason = frame_suspect_reason(data, self._last_good_data)
+            if reason:
+                self.last_suspect_reason = reason
+                if self._suspect_streak < _SUSPECT_FRAME_TOLERANCE:
+                    self._suspect_streak += 1
+                    self.suspect_frames_total += 1
+                    self._consecutive_failures = 0
+                    _LOGGER.info(
+                        "Holding last good data, suspect frame (%s) %d/%d",
+                        reason, self._suspect_streak, _SUSPECT_FRAME_TOLERANCE,
+                    )
+                    return self._last_good_data
+                _LOGGER.warning(
+                    "Accepting changed battery list after %d suspect polls: %s",
+                    self._suspect_streak, reason,
+                )
+            self._suspect_streak = 0
+
+            fill_missing_soc(data, self._last_good_data)
             data = self._apply_soc_cleaners(data)
             self._consecutive_failures = 0
             self._last_good_data = data

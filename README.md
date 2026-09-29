@@ -132,6 +132,7 @@ Go to **Settings → Devices & Services → AECC Local (Community) → ⋮ → D
 - Integration version and device identity (host, IP, and serial number redacted)
 - Live coordinator state — commanded mode, SOC limits, failure reason, consecutive failures
 - SOC cleaner state — last accepted values and timestamps
+- Partial-frame counters — how many incomplete battery-list polls were held and the last reason (unit count only, no serials)
 - Last raw poll response
 - Fresh control-register dump (registers 3000–3130 read at download time)
 - Last 20 control writes with payloads and per-register verify outcomes
@@ -142,6 +143,10 @@ This makes it easy to diagnose silent register drops or mode changes not stickin
 
 - **Failure tolerance**: the integration holds the last known values for up to 5 consecutive poll failures (or 120 seconds) before marking entities unavailable. Transient network dropouts no longer cause flapping.
 - **SOC cleaning**: battery state-of-charge readings are validated against observable physics. Readings of 0% during active charge or discharge cycles, and impossible rate-of-change jumps, are rejected and replaced with the last accepted value.
+- **Startup SOC guard**: for the first 60 seconds after startup, a 0% battery reading with nothing earlier to compare against is held back and the sensor shows unknown. Some devices report a false 0% for 15–20 seconds while warming up. A battery that really is empty shows 0% once the window passes.
+- **Partial battery-list protection**: if a poll returns an empty battery list or omits a unit it previously reported, the last good data is kept for up to 3 polls. If the change persists, it's accepted as real (unit removed or replaced). A unit that reports without its SoC keeps its last value.
+- **Missing units show unavailable**: a battery unit absent from the device's report shows as unavailable instead of dropping to 0. Its entities are kept; delete them manually if the unit was permanently removed.
+- **Restart during a reporting gap**: if Home Assistant starts while a unit is temporarily missing, its known sensors are restored from the entity registry and resume when the unit reports again, with no reload needed.
 - **Write verification**: every control register write is verified by reading the register back after 0.5 seconds. Mismatches are logged as warnings. All writes are recorded in a rolling audit trail (last 20) visible in the diagnostics download.
 - **Connection resilience**: a 2-second cooldown is applied before reconnecting after any TCP error, preventing rapid reconnect loops that can confuse some devices.
 
