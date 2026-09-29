@@ -1,4 +1,4 @@
-"""Run: python3 tests/test_soc_limit_slot.py (no Home Assistant needed; HA is stubbed)."""
+"""Run: python3 tests/test_coordinator_writes.py (no Home Assistant needed; HA is stubbed)."""
 import asyncio
 import importlib
 import sys
@@ -24,14 +24,22 @@ sys.modules["aecc"] = _pkg
 coordinator = importlib.import_module("aecc.coordinator")
 const = importlib.import_module("aecc.const")
 coordinator._WRITE_VERIFY_DELAY = 0
+coordinator._WRITE_RETRY_DELAY = 0
 
 
 class FakeClient:
-    def __init__(self):
+    def __init__(self, drop=0, streak=0, delay=0.0):
         self.writes = []
+        self.drop = drop  # how many sends come back unconfirmed first
+        self.delay = delay
+        self.tcp_manager = types.SimpleNamespace(consecutive_failures=streak)
 
     async def set_control_parameters(self, payload):
         self.writes.append(dict(payload))
+        await asyncio.sleep(self.delay)
+        if self.drop:
+            self.drop -= 1
+            return None
         return {"ok": 1}
 
     async def get_control_parameters(self, regs):
@@ -39,9 +47,9 @@ class FakeClient:
         return {"ControlInfo": {r: last.get(r) for r in last}}
 
 
-def make():
+def make(**client_kwargs):
     c = coordinator.AECCDataUpdateCoordinator(None, "h", 1)
-    c.client = FakeClient()
+    c.client = FakeClient(**client_kwargs)
     return c
 
 
@@ -73,6 +81,36 @@ async def test_no_slot_when_not_under_manual_control():
     assert await c.async_restore_self_consumption()
     assert await c.async_set_max_soc(80)
     assert const.REG_CONTROL_TIME1 not in c.client.writes[-1]
+
+
+async def test_unconfirmed_write_is_resent():
+    c = make(drop=1)
+    assert await c.async_set_min_soc(20)
+    assert len(c.client.writes) == 2
+    assert c.write_history[-1]["attempts"] == 2 and c.write_history[-1]["response_received"]
+
+
+async def test_gives_up_after_two_retries():
+    c = make(drop=5)
+    assert not await c.async_set_min_soc(20)
+    assert len(c.client.writes) == 3
+    assert c.write_history[-1]["attempts"] == 3
+
+
+async def test_no_retry_during_outage():
+    c = make(drop=5, streak=3)
+    assert not await c.async_set_min_soc(20)
+    assert len(c.client.writes) == 1
+
+
+async def test_writes_serialize_and_superseded_verify_is_skipped():
+    c = make(drop=1, delay=0.01)
+    await asyncio.gather(c.async_set_min_soc(20), c.async_set_min_soc(30))
+    # First write's retry landed before the second write: last value wins.
+    assert [w[const.REG_MIN_SOC] for w in c.client.writes] == ["20", "20", "30"]
+    first, second = c.write_history[-2:]
+    assert first["verify_skipped"] == "superseded" and first["verify_result"] is None
+    assert "verify_skipped" not in second and second["verify_result"]
 
 
 if __name__ == "__main__":
