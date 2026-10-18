@@ -18,6 +18,8 @@ from .const import (
     REG_AI_SMART_CHARGE,
     REG_AI_SMART_DISC,
     REG_CUSTOM_MODE,
+    REG_SLOTS,
+    SLOT_SCENE_TROUGHS,
     REG_MIN_SOC,
     REG_MAX_SOC,
     MODE_SELF_CONSUMPTION,
@@ -60,6 +62,15 @@ _WIFI_RSSI_REFRESH_SECONDS = 60
 # Hold a partial Storage_list frame this many polls before accepting it as a
 # real change (unit removed/replaced).
 _SUSPECT_FRAME_TOLERANCE = 3
+
+
+def _find_trough_slot(params: dict) -> tuple[str, list[str]] | None:
+    """First enabled Troughs slot of the app schedule, as (register, fields)."""
+    for reg in REG_SLOTS:
+        fields = str(params.get(reg) or params.get(int(reg)) or "").split(",")
+        if len(fields) == 11 and fields[0] == "1" and fields[5] == SLOT_SCENE_TROUGHS:
+            return reg, fields
+    return None
 
 
 class AECCDataUpdateCoordinator(DataUpdateCoordinator):
@@ -110,6 +121,8 @@ class AECCDataUpdateCoordinator(DataUpdateCoordinator):
         # None until the setup probe reads it; stays None on devices without it.
         self.wifi_rssi: int | None = None
         self._last_rssi_refresh: float | None = None
+        # None unless the vendor-app schedule has a Troughs slot.
+        self.trough_charge_soc: int | None = None
 
         self.last_datalogger_restart_at: datetime | None = None
         self.last_datalogger_restart_sent: bool | None = None
@@ -496,10 +509,27 @@ class AECCDataUpdateCoordinator(DataUpdateCoordinator):
         if rssi is not None:  # a failed read keeps the last value
             self.wifi_rssi = rssi
 
+    async def async_set_trough_charge_soc(self, soc: int) -> bool:
+        """Change only the charge target of the app schedule's Troughs slot.
+
+        The slot is re-read first so app edits to its times or power are kept.
+        """
+        resp = await self.client.get_control_parameters([int(r) for r in REG_SLOTS])
+        trough = _find_trough_slot((resp or {}).get("ControlInfo") or (resp or {}).get("GetParameters") or {})
+        if trough is None:
+            _LOGGER.warning("No enabled Troughs slot in the app schedule; charge target not changed")
+            return False
+        reg, fields = trough
+        fields[9] = str(soc)
+        success = await self._logged_write({reg: ",".join(fields)}, f"trough_charge_soc({soc}%)")
+        if success:
+            self.trough_charge_soc = soc
+        return success
+
     async def async_read_initial_state(self) -> None:
         """Read Min/Max SOC from device on startup so sliders reflect actual state."""
         resp = await self.client.get_control_parameters(
-            [int(REG_MIN_SOC), int(REG_MAX_SOC)]
+            [int(REG_MIN_SOC), int(REG_MAX_SOC), *(int(r) for r in REG_SLOTS)]
         )
         if resp is None:
             _LOGGER.debug("Initial state read: no response (device may not support it)")
@@ -535,3 +565,8 @@ class AECCDataUpdateCoordinator(DataUpdateCoordinator):
             self.initial_max_soc = max_soc
             self._commanded_max_soc = max_soc
             _LOGGER.info("Read initial max SOC: %d%%", max_soc)
+
+        trough = _find_trough_slot(params)
+        if trough is not None:
+            self.trough_charge_soc = int(trough[1][9])
+            _LOGGER.info("Read app Troughs slot %s, charge target %d%%", trough[0], self.trough_charge_soc)

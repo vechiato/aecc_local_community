@@ -33,6 +33,8 @@ async def async_setup_entry(
         AECCChargePowerSlider(coordinator, config_entry, device_sn),
         AECCDischargePowerSlider(coordinator, config_entry, device_sn),
     ])
+    if coordinator.trough_charge_soc is not None:
+        async_add_entities([AECCTroughChargeTarget(coordinator, config_entry, device_sn)])
 
 
 def _clamp(value: float, minimum: float, maximum: float) -> float:
@@ -224,3 +226,35 @@ class AECCDischargePowerSlider(_PassivePowerSlider):
     def __init__(self, coordinator, config_entry, device_sn):
         super().__init__(coordinator, config_entry, device_sn)
         self._attr_unique_id = f"aecc_{device_sn}_discharge_power_target"
+
+
+class AECCTroughChargeTarget(CoordinatorEntity, NumberEntity):
+    """Charge target of the vendor-app Troughs slot. Edits only that slot."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Trough Charge Target"
+    _attr_icon = "mdi:battery-clock"
+    _attr_native_min_value = 10
+    _attr_native_max_value = 100
+    _attr_native_step = 1
+    _attr_native_unit_of_measurement = PERCENTAGE
+    _attr_mode = NumberMode.SLIDER
+
+    def __init__(self, coordinator: AECCDataUpdateCoordinator, config_entry: ConfigEntry, device_sn: str) -> None:
+        super().__init__(coordinator)
+        self._device_sn = device_sn
+        self._attr_unique_id = f"aecc_{device_sn}_trough_charge_soc"
+
+    @property
+    def native_value(self) -> int | None:
+        return self.coordinator.trough_charge_soc
+
+    @property
+    def device_info(self):
+        return {"identifiers": {(DOMAIN, self._device_sn)}, "name": self._device_sn, "manufacturer": "AECC"}
+
+    async def async_set_native_value(self, value: float) -> None:
+        if await self.coordinator.async_set_trough_charge_soc(int(value)):
+            self.async_write_ha_state()
+        else:
+            _LOGGER.warning("Failed to set trough charge target to %d%%", int(value))

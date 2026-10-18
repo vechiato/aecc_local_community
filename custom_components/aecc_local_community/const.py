@@ -20,6 +20,9 @@ REG_AI_SMART_DISC = "3022"    # 0 = off, 1 = on
 REG_MIN_SOC = "3023"          # Minimum discharge SOC (%)
 REG_MAX_SOC = "3024"          # Maximum charge SOC (%)
 REG_CUSTOM_MODE = "3030"      # 0 = off, 1 = on
+# Vendor-app schedule slots 1–16: "on,start,end,?,power,scene,0,0,0,charge_soc,discharge_soc"
+REG_SLOTS = [str(r) for r in range(3003, 3019)]
+SLOT_SCENE_TROUGHS = "1"      # scene field: 0 = Peaks, 1 = Troughs, 3 = Smart Linkage
 
 # Disabled/idle time slot — clears any active schedule slot
 SLOT_DISABLED = "0,00:00,00:00,0,0,0,0,0,0,100,10"
