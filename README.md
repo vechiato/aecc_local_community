@@ -8,7 +8,7 @@ Discovers devices via mDNS/Zeroconf and communicates over a persistent local TCP
 
 | Device | Sensors | Control |
 |--------|---------|---------|
-| Inverter / Storage (e.g. AFERIY PS420) | Battery SoC, discharge power, total PV power, AC input power | Operating mode, SOC limits, charge/discharge power |
+| Inverter / Storage (e.g. AFERIY PS420) | Battery SoC, discharge power, total PV power, AC input power | Operating mode, SOC limits, charge/discharge power, app-schedule trough charge target |
 | System summary | Total PV, battery, grid, backup, and load power | — |
 | Smart Plug | Active power | On/Off |
 | EV Charger | Connector status and power | On/Off |
@@ -71,13 +71,13 @@ If you are running a different firmware version and some of these fields work co
 
 ## Battery control
 
-Inverter/Storage devices expose five control entities in addition to read-only sensors.
+Inverter/Storage devices expose five control entities in addition to read-only sensors, plus a sixth (**Trough Charge Target**) when the AECC app schedule has a Troughs slot.
 
 ### Operating Mode
 
 | Mode | Behaviour |
 |------|-----------|
-| **Self-Gen / Zero Export** | AI self-consumption — the battery decides when to charge and discharge automatically. This is the safe default to return to after manual control. |
+| **Self-Gen / Zero Export** | AI self-consumption — the battery decides when to charge and discharge automatically. This is the safe default to return to after manual control. Selecting it clears the AECC app schedule's first slot. |
 | **Idle** | Battery does nothing — no charging or discharging. |
 | **Charge** | Forces the battery to charge at the **Charge Power** slider value. |
 | **Discharge** | Forces the battery to discharge at the **Discharge Power** slider value. |
@@ -109,6 +109,26 @@ These sliders are passive — they store the target locally and do not send a co
 If you schedule the battery in the AECC app with a **Troughs** slot (e.g. 02:00–05:00 cheap-rate charging), a **Trough Charge Target** slider appears. It changes only that slot's charge SoC on the device; the slot's times, power and every other app slot are left as they are. The battery keeps running the app schedule itself, so it still works if Home Assistant is down.
 
 Use it from an automation to charge less overnight when a sunny day is forecast, e.g. set it at 01:30 from a solar forecast. The slider only appears if an enabled Troughs slot was found when the integration started.
+
+Example: trim the overnight charge by today's Solcast forecast, never below a 50% reserve (`3.9` = total battery capacity in kWh):
+
+```yaml
+automation:
+  - alias: Battery - overnight charge target from Solcast
+    triggers:
+      - trigger: time
+        at: "01:30:00"
+    actions:
+      - action: number.set_value
+        target:
+          entity_id: number.<sn>_local_trough_charge_target
+        data:
+          value: >
+            {% set fc = states('sensor.solcast_pv_forecast_forecast_today') %}
+            {% if is_number(fc) %}
+              {{ [[100 - (fc | float / 3.9 * 100) | round(0), 50] | max, 100] | min | int }}
+            {% else %}100{% endif %}
+```
 
 > **Note:** the Operating Mode selector replaces the app schedule's first slot. If you schedule in the app, don't use Operating Mode.
 
