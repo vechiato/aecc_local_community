@@ -19,6 +19,10 @@ from .const import (
     REG_AI_SMART_DISC,
     REG_CUSTOM_MODE,
     REG_SLOTS,
+    SLOT_CHARGE_SOC,
+    SLOT_DISCHARGE_SOC,
+    SLOT_SCENE_PEAKS,
+    SLOT_SCENE_SMART,
     SLOT_SCENE_TROUGHS,
     REG_MIN_SOC,
     REG_MAX_SOC,
@@ -64,13 +68,33 @@ _WIFI_RSSI_REFRESH_SECONDS = 60
 _SUSPECT_FRAME_TOLERANCE = 3
 
 
-def _find_trough_slot(params: dict) -> tuple[str, list[str]] | None:
-    """First enabled Troughs slot of the app schedule, as (register, fields)."""
+def _enabled_slots(params: dict) -> list[tuple[str, list[str]]]:
+    """Enabled app-schedule slots as (register, fields)."""
+    slots = []
     for reg in REG_SLOTS:
         fields = str(params.get(reg) or params.get(int(reg)) or "").split(",")
-        if len(fields) == 11 and fields[0] == "1" and fields[5] == SLOT_SCENE_TROUGHS:
-            return reg, fields
-    return None
+        if len(fields) == 11 and fields[0] == "1":
+            slots.append((reg, fields))
+    return slots
+
+
+def _find_trough_slot(params: dict) -> tuple[str, list[str]] | None:
+    """First enabled Troughs slot of the app schedule."""
+    return next((s for s in _enabled_slots(params) if s[1][5] == SLOT_SCENE_TROUGHS), None)
+
+
+def _find_day_slot(params: dict) -> tuple[str, list[str]] | None:
+    """The Smart Linkage slot that runs up to the Peaks slot, e.g. 05:01-15:59 before 16:00.
+
+    Its discharge floor is the reserve held for the peak. Times are zero-padded
+    HH:MM, so string comparison orders them.
+    """
+    slots = _enabled_slots(params)
+    peak = next((s for s in slots if s[1][5] == SLOT_SCENE_PEAKS), None)
+    if peak is None:
+        return None
+    before = [s for s in slots if s[1][5] == SLOT_SCENE_SMART and s[1][2] <= peak[1][1]]
+    return max(before, key=lambda s: s[1][2], default=None)
 
 
 class AECCDataUpdateCoordinator(DataUpdateCoordinator):
@@ -123,6 +147,8 @@ class AECCDataUpdateCoordinator(DataUpdateCoordinator):
         self._last_rssi_refresh: float | None = None
         # None unless the vendor-app schedule has a Troughs slot.
         self.trough_charge_soc: int | None = None
+        # None unless the schedule has a Smart Linkage slot running up to a Peaks slot.
+        self.day_reserve_soc: int | None = None
 
         self.last_datalogger_restart_at: datetime | None = None
         self.last_datalogger_restart_sent: bool | None = None
@@ -509,21 +535,32 @@ class AECCDataUpdateCoordinator(DataUpdateCoordinator):
         if rssi is not None:  # a failed read keeps the last value
             self.wifi_rssi = rssi
 
-    async def async_set_trough_charge_soc(self, soc: int) -> bool:
-        """Change only the charge target of the app schedule's Troughs slot.
+    async def _set_slot_soc(self, find_slot, field: int, soc: int, name: str) -> bool:
+        """Change one SoC field of one app-schedule slot.
 
-        The slot is re-read first so app edits to its times or power are kept.
+        The slots are re-read first so app edits to times or power are kept.
         """
         resp = await self.client.get_control_parameters([int(r) for r in REG_SLOTS])
-        trough = _find_trough_slot((resp or {}).get("ControlInfo") or (resp or {}).get("GetParameters") or {})
-        if trough is None:
-            _LOGGER.warning("No enabled Troughs slot in the app schedule; charge target not changed")
+        slot = find_slot((resp or {}).get("ControlInfo") or (resp or {}).get("GetParameters") or {})
+        if slot is None:
+            _LOGGER.warning("No matching slot in the app schedule; %s not changed", name)
             return False
-        reg, fields = trough
-        fields[9] = str(soc)
-        success = await self._logged_write({reg: ",".join(fields)}, f"trough_charge_soc({soc}%)")
+        reg, fields = slot
+        fields[field] = str(soc)
+        return await self._logged_write({reg: ",".join(fields)}, f"{name}({soc}%)")
+
+    async def async_set_trough_charge_soc(self, soc: int) -> bool:
+        """Change only the charge target of the app schedule's Troughs slot."""
+        success = await self._set_slot_soc(_find_trough_slot, SLOT_CHARGE_SOC, soc, "trough_charge_soc")
         if success:
             self.trough_charge_soc = soc
+        return success
+
+    async def async_set_day_reserve_soc(self, soc: int) -> bool:
+        """Change only the discharge floor of the slot running up to the peak."""
+        success = await self._set_slot_soc(_find_day_slot, SLOT_DISCHARGE_SOC, soc, "day_reserve_soc")
+        if success:
+            self.day_reserve_soc = soc
         return success
 
     async def async_read_initial_state(self) -> None:
@@ -568,5 +605,9 @@ class AECCDataUpdateCoordinator(DataUpdateCoordinator):
 
         trough = _find_trough_slot(params)
         if trough is not None:
-            self.trough_charge_soc = int(trough[1][9])
+            self.trough_charge_soc = int(trough[1][SLOT_CHARGE_SOC])
             _LOGGER.info("Read app Troughs slot %s, charge target %d%%", trough[0], self.trough_charge_soc)
+        day = _find_day_slot(params)
+        if day is not None:
+            self.day_reserve_soc = int(day[1][SLOT_DISCHARGE_SOC])
+            _LOGGER.info("Read app pre-peak slot %s, day reserve %d%%", day[0], self.day_reserve_soc)

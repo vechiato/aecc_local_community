@@ -33,8 +33,11 @@ async def async_setup_entry(
         AECCChargePowerSlider(coordinator, config_entry, device_sn),
         AECCDischargePowerSlider(coordinator, config_entry, device_sn),
     ])
-    if coordinator.trough_charge_soc is not None:
-        async_add_entities([AECCTroughChargeTarget(coordinator, config_entry, device_sn)])
+    async_add_entities([
+        cls(coordinator, config_entry, device_sn)
+        for cls in (AECCTroughChargeTarget, AECCDayReserve)
+        if getattr(coordinator, cls._soc_attr) is not None
+    ])
 
 
 def _clamp(value: float, minimum: float, maximum: float) -> float:
@@ -228,33 +231,53 @@ class AECCDischargePowerSlider(_PassivePowerSlider):
         self._attr_unique_id = f"aecc_{device_sn}_discharge_power_target"
 
 
-class AECCTroughChargeTarget(CoordinatorEntity, NumberEntity):
-    """Charge target of the vendor-app Troughs slot. Edits only that slot."""
+class _AppSlotSoc(CoordinatorEntity, NumberEntity):
+    """One SoC field of one vendor-app schedule slot. Edits only that field."""
 
     _attr_has_entity_name = True
-    _attr_name = "Trough Charge Target"
-    _attr_icon = "mdi:battery-clock"
-    _attr_native_min_value = 10
     _attr_native_max_value = 100
     _attr_native_step = 1
     _attr_native_unit_of_measurement = PERCENTAGE
     _attr_mode = NumberMode.SLIDER
 
+    _soc_attr: str = ""
+    _setter: str = ""
+
     def __init__(self, coordinator: AECCDataUpdateCoordinator, config_entry: ConfigEntry, device_sn: str) -> None:
         super().__init__(coordinator)
         self._device_sn = device_sn
-        self._attr_unique_id = f"aecc_{device_sn}_trough_charge_soc"
+        self._attr_unique_id = f"aecc_{device_sn}_{self._soc_attr}"
 
     @property
     def native_value(self) -> int | None:
-        return self.coordinator.trough_charge_soc
+        return getattr(self.coordinator, self._soc_attr)
 
     @property
     def device_info(self):
         return {"identifiers": {(DOMAIN, self._device_sn)}, "name": self._device_sn, "manufacturer": "AECC"}
 
     async def async_set_native_value(self, value: float) -> None:
-        if await self.coordinator.async_set_trough_charge_soc(int(value)):
+        if await getattr(self.coordinator, self._setter)(int(value)):
             self.async_write_ha_state()
         else:
-            _LOGGER.warning("Failed to set trough charge target to %d%%", int(value))
+            _LOGGER.warning("Failed to set %s to %d%%", self._attr_name, int(value))
+
+
+class AECCTroughChargeTarget(_AppSlotSoc):
+    """Charge target of the vendor-app Troughs slot."""
+
+    _attr_name = "Trough Charge Target"
+    _attr_icon = "mdi:battery-clock"
+    _attr_native_min_value = 10
+    _soc_attr = "trough_charge_soc"
+    _setter = "async_set_trough_charge_soc"
+
+
+class AECCDayReserve(_AppSlotSoc):
+    """Discharge floor of the Smart Linkage slot that runs up to the Peaks slot."""
+
+    _attr_name = "Day Reserve"
+    _attr_icon = "mdi:battery-lock"
+    _attr_native_min_value = 10  # the app's discharge slider bottoms out at 10%
+    _soc_attr = "day_reserve_soc"
+    _setter = "async_set_day_reserve_soc"
