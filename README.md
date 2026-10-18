@@ -35,8 +35,10 @@ The integration automatically creates energy sensors (kWh) when a device is adde
 | Sensor | Measures |
 |--------|----------|
 | Solar Energy | Cumulative PV production |
-| Battery Charge Energy | Cumulative energy into all batteries |
-| Battery Discharge Energy | Cumulative energy out of all batteries |
+| Battery Charge Energy | Cumulative energy into all batteries, from the grid and from their panels |
+| Battery Discharge Energy | Cumulative energy the batteries deliver to the house |
+
+Both battery counters follow **Battery Power** (signed, positive = charging), which is the energy balance: PV in minus what leaves the grid and backup sockets. That is measured on the house side, so inverter losses count where the house pays for them and the Energy Dashboard adds up with **Solar Energy** as solar. (Before 1.4.0 the counters used the device's cell-side figures, which missed those losses; existing counters continue from their current value.)
 
 **Per-device sensors** (one set per device, prefixed with the device serial number, e.g. `ABC123 Battery Charge Energy`):
 
@@ -59,13 +61,13 @@ Several fields in the device API are not reliably populated and always report 0 
 
 | Sensor | API field | Issue | Reliable alternative |
 |--------|-----------|-------|----------------------|
-| Battery Charging Power | `Storage_list.BatteryChargingPower` | Always 0 even when battery is charging | **Total Charge Power** (`SSumInfoList.TotalChargePower`) |
+| Battery Charging Power | `Storage_list.BatteryChargingPower` | Always 0 even when battery is charging | **Battery Power** (system energy balance) |
 | Pv Charging Power | `Storage_list.PvChargingPower` | Always 0 even when PV is producing | **Pv Power** (`SSumInfoList.TotalPVPower`) |
 | Pv1–Pv4 Power | `Storage_list.Pv1Power`–`Pv4Power` | Per-string breakdown not reported | **Pv Power** for system total |
 | Pv String Count | `Storage_list.PvStringCount` | Always 0 | Not available |
 | Total Active Power | `SSumInfoList.MeterTotalActivePower` | Always 0; requires an external grid meter | Not available without meter |
 
-As a result of the `BatteryChargingPower` issue, the per-device `<SN> Battery Charge Energy` sensor will always stay at 0 kWh. Use the system-total **Battery Charge Energy** sensor (driven by `TotalChargePower`) for accurate energy tracking.
+As a result of the `BatteryChargingPower` issue, the per-device `<SN> Battery Charge Energy` sensor will always stay at 0 kWh. Use the system-total **Battery Charge Energy** sensor (driven by Battery Power) for accurate energy tracking.
 
 If you are running a different firmware version and some of these fields work correctly, please [open an issue](https://github.com/vechiato/aecc_local_community/issues).
 

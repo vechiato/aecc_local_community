@@ -72,14 +72,37 @@ SENSOR_MAP = {
     }
 }
 
+def battery_power_w(summary: dict | None) -> float | None:
+    """Signed system battery power, positive = charging: PV in minus what leaves both sockets.
+
+    The energy balance, so the Energy Dashboard adds up with Solar Energy as
+    solar. TotalGridOutputPower is positive towards the house; the backup
+    socket is the second way out. Not TotalChargePower/TotalBatteryOutputPower:
+    those are cell side, so they miss inverter losses the house pays for.
+    Ported from StekkerDeal/aecc-battery-local v1.8.0.
+    """
+    try:
+        grid_output = float(summary["TotalGridOutputPower"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    try:
+        pv = float(summary.get("TotalPVPower") or 0)
+        backup = float(summary.get("TotalBackUpPower") or 0)
+    except (TypeError, ValueError):
+        return None
+    return round(pv - grid_output - backup, 1)
+
+
 # Energy sensors auto-created for the HA Energy Dashboard.
 # Tuples: (key_suffix, data_type, api_path, label)
 # SSumInfoList entries produce system-total sensors (no SN prefix).
 # Storage_list entries produce per-device sensors (SN prefix).
+# api_path "BALANCE_IN"/"BALANCE_OUT" = positive/negative part of battery_power_w().
+_BALANCE_PATHS = {"BALANCE_IN": 1, "BALANCE_OUT": -1}
 ENERGY_SENSOR_DEFS = [
     ("solar_energy", "SSumInfoList", "TotalPVPower", "Solar Energy"),
-    ("battery_charge_energy", "SSumInfoList", "TotalChargePower", "Battery Charge Energy"),
-    ("battery_discharge_energy", "SSumInfoList", "TotalBatteryOutputPower", "Battery Discharge Energy"),
+    ("battery_charge_energy", "SSumInfoList", "BALANCE_IN", "Battery Charge Energy"),
+    ("battery_discharge_energy", "SSumInfoList", "BALANCE_OUT", "Battery Discharge Energy"),
     ("battery_charge_energy", "Storage_list", "BatteryChargingPower", "Battery Charge Energy"),
     ("battery_discharge_energy", "Storage_list", "BatteryDischargingPower", "Battery Discharge Energy"),
 ]
@@ -129,10 +152,14 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
                     AECCEnergySensor(coordinator, device_sn, data_type, api_path, key_suffix, label, sn=sn)
                 )
         else:
-            if raw_data.get(api_path) is not None:
+            value = battery_power_w(raw_data) if api_path in _BALANCE_PATHS else raw_data.get(api_path)
+            if value is not None:
                 sensors.append(
                     AECCEnergySensor(coordinator, device_sn, data_type, api_path, key_suffix, label)
                 )
+
+    if battery_power_w(coordinator.data.get("SSumInfoList")) is not None:
+        sensors.append(AECCBatteryPowerSensor(coordinator, device_sn))
 
     sensors.extend(_restore_missing_storage_sensors(hass, config_entry, coordinator, device_sn))
 
@@ -335,6 +362,9 @@ class AECCEnergySensor(CoordinatorEntity, SensorEntity, RestoreEntity):
             item = raw
         if item is None:
             return None
+        if self._api_path in _BALANCE_PATHS:
+            power = battery_power_w(item)
+            return None if power is None else max(power * _BALANCE_PATHS[self._api_path], 0.0)
         value = item.get(self._api_path)
         if value is None:
             return None
@@ -384,6 +414,33 @@ class AECCEnergySensor(CoordinatorEntity, SensorEntity, RestoreEntity):
             "identifiers": {(DOMAIN, self._device_sn)},
             "name": self._device_sn,
             "model": model,
+            "manufacturer": "AECC",
+        }
+
+
+class AECCBatteryPowerSensor(CoordinatorEntity, SensorEntity):
+    """Signed system battery power from the energy balance, positive = charging."""
+
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_native_unit_of_measurement = UnitOfPower.WATT
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_has_entity_name = True
+
+    def __init__(self, coordinator, device_sn: str) -> None:
+        super().__init__(coordinator)
+        self._device_sn = device_sn
+        self._attr_unique_id = f"aecc_{device_sn}_battery_power"
+        self._attr_name = "Battery Power"
+
+    @property
+    def native_value(self):
+        return battery_power_w(self.coordinator.data.get("SSumInfoList") if self.coordinator.data else None)
+
+    @property
+    def device_info(self):
+        return {
+            "identifiers": {(DOMAIN, self._device_sn)},
+            "name": self._device_sn,
             "manufacturer": "AECC",
         }
 
