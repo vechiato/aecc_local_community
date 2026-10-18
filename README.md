@@ -142,6 +142,11 @@ automation:
           entity_id: number.<sn>_local_day_reserve
         data:
           value: "{{ reserve }}"
+      - action: notify.send_message  # optional: report tonight's values
+        target:
+          entity_id: notify.<your_notify_entity>
+        data:
+          message: "Overnight charge: {{ target }}%, day reserve: {{ reserve }}%"
 ```
 
 If the forecast is unavailable, `float(0)` makes the surplus 0, so it charges to 100% and keeps a 50% reserve.
