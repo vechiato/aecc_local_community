@@ -8,7 +8,7 @@ Discovers devices via mDNS/Zeroconf and communicates over a persistent local TCP
 
 | Device | Sensors | Control |
 |--------|---------|---------|
-| Inverter / Storage (e.g. AFERIY PS420) | Battery SoC, discharge power, total PV power, AC input power | Operating mode, SOC limits, charge/discharge power, app-schedule trough charge target |
+| Inverter / Storage (e.g. AFERIY PS420) | Battery SoC, discharge power, total PV power, AC input power | Operating mode, SOC limits, charge/discharge power, app-schedule trough charge target and day reserve |
 | System summary | Total PV, battery, grid, backup, and load power | — |
 | Smart Plug | Active power | On/Off |
 | EV Charger | Connector status and power | On/Off |
@@ -73,7 +73,7 @@ If you are running a different firmware version and some of these fields work co
 
 ## Battery control
 
-Inverter/Storage devices expose five control entities in addition to read-only sensors, plus a sixth (**Trough Charge Target**) when the AECC app schedule has a Troughs slot.
+Inverter/Storage devices expose five control entities in addition to read-only sensors, plus **Trough Charge Target** and **Day Reserve** when the AECC app schedule has matching slots.
 
 ### Operating Mode
 
@@ -106,31 +106,50 @@ These sliders are passive — they store the target locally and do not send a co
 
 > **Note:** 800 W is the observed reliable limit for local TCP control. Higher values may work on some devices but are not guaranteed.
 
-### Trough Charge Target (vendor-app schedule)
+### Trough Charge Target and Day Reserve (vendor-app schedule)
 
-If you schedule the battery in the AECC app with a **Troughs** slot (e.g. 02:00–05:00 cheap-rate charging), a **Trough Charge Target** slider appears. It changes only that slot's charge SoC on the device; the slot's times, power and every other app slot are left as they are. The battery keeps running the app schedule itself, so it still works if Home Assistant is down.
+If you schedule the battery in the AECC app, two sliders can adjust that schedule without replacing it:
 
-Use it from an automation to charge less overnight when a sunny day is forecast, e.g. set it at 01:30 from a solar forecast. The slider only appears if an enabled Troughs slot was found when the integration started.
+| Entity | Edits | Appears when the app schedule has |
+|--------|-------|-----------------------------------|
+| **Trough Charge Target** | Charge SoC of the Troughs slot (e.g. 02:00–05:00 cheap-rate charging) | An enabled Troughs slot |
+| **Day Reserve** | Discharge SoC of the Smart Linkage slot that runs up to the Peaks slot (e.g. 05:01–15:59 before a 16:00 peak), the charge held back for the peak | An enabled Peaks slot with a Smart Linkage slot before it |
 
-Example: trim the overnight charge by today's Solcast forecast, never below a 50% reserve (`3.9` = total battery capacity in kWh):
+Each slider changes only that one value on the device; slot times, power and every other app slot are left as they are. The battery keeps running the app schedule itself, so it still works if Home Assistant is down. The sliders are created only if their slot was found when the integration started.
+
+Use them together from an automation: on a sunny day the panels refill the battery before the peak, so it needs less charge overnight and less held back during the day. Lowering only the charge target below the day reserve leaves the battery unable to cover the morning.
+
+Example at 01:30 from a Solcast forecast. `2` is the solar the house uses directly during the day (kWh), `3.9` the total battery capacity (kWh), `1.5` the solar surplus that refills enough for the peak:
 
 ```yaml
 automation:
-  - alias: Battery - overnight charge target from Solcast
+  - alias: Battery - overnight targets from Solcast
     triggers:
       - trigger: time
         at: "01:30:00"
+    variables:
+      surplus: "{{ [states('sensor.solcast_pv_forecast_forecast_today') | float(0) - 2, 0] | max }}"
+      target: "{{ [100 - (surplus / 3.9 * 100) | round(0), 30] | max | int }}"
+      reserve: "{{ 30 if surplus >= 1.5 else 50 }}"
     actions:
       - action: number.set_value
         target:
           entity_id: number.<sn>_local_trough_charge_target
         data:
-          value: >
-            {% set fc = states('sensor.solcast_pv_forecast_forecast_today') %}
-            {% if is_number(fc) %}
-              {{ [[100 - (fc | float / 3.9 * 100) | round(0), 50] | max, 100] | min | int }}
-            {% else %}100{% endif %}
+          value: "{{ target }}"
+      - action: number.set_value
+        target:
+          entity_id: number.<sn>_local_day_reserve
+        data:
+          value: "{{ reserve }}"
+      - action: notify.send_message  # optional: report tonight's values
+        target:
+          entity_id: notify.<your_notify_entity>
+        data:
+          message: "Overnight charge: {{ target }}%, day reserve: {{ reserve }}%"
 ```
+
+If the forecast is unavailable, `float(0)` makes the surplus 0, so it charges to 100% and keeps a 50% reserve.
 
 > **Note:** the Operating Mode selector replaces the app schedule's first slot. If you schedule in the app, don't use Operating Mode.
 

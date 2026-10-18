@@ -155,6 +155,9 @@ class ScheduleClient(FakeClient):
             "3003": "1,00:00,01:59,0,1600,3,0,0,0,10,10",
             "3004": "1,02:00,05:00,0,2000,1,0,0,0,100,10",
             "3005": "1,05:01,15:59,0,1600,3,0,0,0,10,50",
+            "3006": "1,16:00,19:00,0,1600,0,0,0,0,99,10",
+            "3007": "1,19:01,23:59,0,1600,3,0,0,0,10,10",
+            "3008": "0,00:00,00:00,0,0,0,0,0,0,100,10",
         }
 
     async def set_control_parameters(self, payload):
@@ -173,6 +176,25 @@ async def test_trough_target_edits_only_charge_soc_of_trough_slot():
     assert await c.async_set_trough_charge_soc(70)
     assert c.client.writes == [{"3004": "1,02:00,05:00,0,2000,1,0,0,0,70,10"}]
     assert c.trough_charge_soc == 70
+
+
+async def test_day_reserve_edits_discharge_floor_of_pre_peak_slot():
+    c = make()
+    c.client = ScheduleClient()
+    await c.async_read_initial_state()
+    assert c.day_reserve_soc == 50
+    assert await c.async_set_day_reserve_soc(30)
+    # 05:01-15:59 runs up to the 16:00 Peaks slot; 00:00-01:59 and 19:01 are left alone.
+    assert c.client.writes == [{"3005": "1,05:01,15:59,0,1600,3,0,0,0,10,30"}]
+
+
+async def test_day_reserve_absent_without_peaks_slot():
+    c = make()
+    c.client = ScheduleClient()
+    del c.client.regs["3006"]
+    await c.async_read_initial_state()
+    assert c.day_reserve_soc is None
+    assert not await c.async_set_day_reserve_soc(30)
 
 
 async def test_trough_target_refuses_without_trough_slot():

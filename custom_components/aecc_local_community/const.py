@@ -22,7 +22,11 @@ REG_MAX_SOC = "3024"          # Maximum charge SOC (%)
 REG_CUSTOM_MODE = "3030"      # 0 = off, 1 = on
 # Vendor-app schedule slots 1–16: "on,start,end,?,power,scene,0,0,0,charge_soc,discharge_soc"
 REG_SLOTS = [str(r) for r in range(3003, 3019)]
-SLOT_SCENE_TROUGHS = "1"      # scene field: 0 = Peaks, 1 = Troughs, 3 = Smart Linkage
+SLOT_SCENE_PEAKS = "0"        # scene field: 0 = Peaks, 1 = Troughs, 3 = Smart Linkage
+SLOT_SCENE_TROUGHS = "1"
+SLOT_SCENE_SMART = "3"
+SLOT_CHARGE_SOC = 9           # field index of the slot's charge SoC
+SLOT_DISCHARGE_SOC = 10       # field index of the slot's discharge SoC
 
 # Disabled/idle time slot — clears any active schedule slot
 SLOT_DISABLED = "0,00:00,00:00,0,0,0,0,0,0,100,10"
