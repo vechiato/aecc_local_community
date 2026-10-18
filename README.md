@@ -104,6 +104,14 @@ These sliders are passive — they store the target locally and do not send a co
 
 > **Note:** 800 W is the observed reliable limit for local TCP control. Higher values may work on some devices but are not guaranteed.
 
+### Trough Charge Target (vendor-app schedule)
+
+If you schedule the battery in the AECC app with a **Troughs** slot (e.g. 02:00–05:00 cheap-rate charging), a **Trough Charge Target** slider appears. It changes only that slot's charge SoC on the device; the slot's times, power and every other app slot are left as they are. The battery keeps running the app schedule itself, so it still works if Home Assistant is down.
+
+Use it from an automation to charge less overnight when a sunny day is forecast, e.g. set it at 01:30 from a solar forecast. The slider only appears if an enabled Troughs slot was found when the integration started.
+
+> **Note:** the Operating Mode selector replaces the app schedule's first slot. If you schedule in the app, don't use Operating Mode.
+
 ## Configuration options
 
 After adding a device, open **Settings → Devices & Services → AECC Local (Community) → Configure** to adjust:

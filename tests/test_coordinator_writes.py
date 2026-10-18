@@ -146,6 +146,45 @@ async def test_wifi_rssi_refresh_throttled_and_keeps_last_on_failure():
     assert c.wifi_rssi == -55 and c.client.calls == 3
 
 
+class ScheduleClient(FakeClient):
+    """Device holding the vendor-app schedule from a real PS240 dump."""
+
+    def __init__(self):
+        super().__init__()
+        self.regs = {
+            "3003": "1,00:00,01:59,0,1600,3,0,0,0,10,10",
+            "3004": "1,02:00,05:00,0,2000,1,0,0,0,100,10",
+            "3005": "1,05:01,15:59,0,1600,3,0,0,0,10,50",
+        }
+
+    async def set_control_parameters(self, payload):
+        self.regs.update(payload)
+        return await super().set_control_parameters(payload)
+
+    async def get_control_parameters(self, regs):
+        return {"ControlInfo": dict(self.regs)}
+
+
+async def test_trough_target_edits_only_charge_soc_of_trough_slot():
+    c = make()
+    c.client = ScheduleClient()
+    await c.async_read_initial_state()
+    assert c.trough_charge_soc == 100
+    assert await c.async_set_trough_charge_soc(70)
+    assert c.client.writes == [{"3004": "1,02:00,05:00,0,2000,1,0,0,0,70,10"}]
+    assert c.trough_charge_soc == 70
+
+
+async def test_trough_target_refuses_without_trough_slot():
+    c = make()
+    c.client = ScheduleClient()
+    c.client.regs["3004"] = "0,00:00,00:00,0,0,0,0,0,0,100,10"
+    await c.async_read_initial_state()
+    assert c.trough_charge_soc is None
+    assert not await c.async_set_trough_charge_soc(70)
+    assert c.client.writes == []
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):
