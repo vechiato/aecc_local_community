@@ -13,6 +13,7 @@ from .const import (
     MAX_POLL_INTERVAL,
     get_device_type_name,
 )
+from .tcp_client import AECCDeviceClient
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
 
@@ -91,6 +92,40 @@ class AeccLocalPluginConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required("deviceName"): vol.All(str, vol.Length(min=1, max=64)),
             }),
             errors={},
+        )
+
+
+    async def async_step_reconfigure(self, user_input: Optional[Dict[str, Any]] = None):
+        """Point an existing entry at a new IP, keeping its entities and history."""
+        entry = self._get_reconfigure_entry()
+        errors: Dict[str, str] = {}
+        if user_input is not None:
+            ip, port = user_input["device_ip"].strip(), user_input["device_port"]
+            client = AECCDeviceClient(ip, port)
+            try:
+                data = await client.fetch_data()
+            finally:
+                await client.disconnect()
+            units = (data or {}).get("Storage_list")
+            if not data:
+                errors["base"] = "cannot_connect"
+            elif units and entry.data["device_sn"] not in {u.get("StorageSN") for u in units}:
+                errors["base"] = "wrong_device"
+            else:
+                return self.async_update_reload_and_abort(
+                    entry, data_updates={"host": ip, "device_ip": ip, "port": port, "device_port": port},
+                )
+
+        return self.async_show_form(
+            step_id="reconfigure",
+            description_placeholders={"sn": entry.data["device_sn"]},
+            data_schema=vol.Schema({
+                vol.Required("device_ip", default=entry.data.get("device_ip", "")): str,
+                vol.Required("device_port", default=int(entry.data.get("device_port") or 8080)): vol.All(
+                    vol.Coerce(int), vol.Range(min=1, max=65535)
+                ),
+            }),
+            errors=errors,
         )
 
 

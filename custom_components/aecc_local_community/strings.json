@@ -2,7 +2,8 @@
   "config": {
     "abort": {
       "already_configured": "This device is already configured.",
-      "not_aecc_device": "Discovered device is not an AECC device."
+      "not_aecc_device": "Discovered device is not an AECC device.",
+      "reconfigure_successful": "The device address was updated."
     },
     "step": {
       "confirm_discovery": {
@@ -11,7 +12,19 @@
         "data": {
           "deviceName": "Device Name"
         }
+      },
+      "reconfigure": {
+        "title": "Change device address",
+        "description": "New IP address for {sn}, e.g. after the device moved to a different IP. Entities and history are kept.",
+        "data": {
+          "device_ip": "IP address",
+          "device_port": "Port"
+        }
       }
+    },
+    "error": {
+      "cannot_connect": "No reply from a device at this address. Check the IP and that the device is on the network.",
+      "wrong_device": "The device at this address does not report serial {sn}."
     }
   },
   "options": {

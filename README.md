@@ -163,6 +163,10 @@ After adding a device, open **Settings → Devices & Services → AECC Local (Co
 
 Changes take effect immediately (the integration reloads automatically).
 
+### Changing the device IP
+
+If a device moves to a new IP (for example after re-adding it in the vendor app), the integration normally follows it from its mDNS announcement. If it doesn't, open **Settings → Devices & Services → AECC Local (Community) → ⋮ → Reconfigure** on the entry and enter the new IP. The integration checks that the device answers and reports the same serial, then reloads; entities, history and energy counters are kept. A DHCP reservation in your router stops the IP changing in the first place.
+
 ## Diagnostic entities
 
 Each device exposes these diagnostic sensors to help with troubleshooting:
