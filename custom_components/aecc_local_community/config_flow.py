@@ -52,7 +52,12 @@ class AeccLocalPluginConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         _LOGGER.info("discovery: %s", self._default_name)
         await self.async_set_unique_id(self._device_sn)
-        self._abort_if_unique_id_configured()
+        # A device re-added in the vendor app can come back on a new IP; follow it.
+        self._abort_if_unique_id_configured(updates={
+            "host": self._host,
+            "device_ip": self._device_ip or self._host,
+            "device_port": self._device_port,
+        })
 
         self.context.update({"title_placeholders": {"name": self._default_name}})
         return await self.async_step_confirm_discovery()
@@ -68,7 +73,7 @@ class AeccLocalPluginConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     "host": self._host,
                     "port": self._port,
                     "device_sn": self._device_sn,
-                    "device_ip": self._device_ip,
+                    "device_ip": self._device_ip or self._host,
                     "device_type": self._device_type,
                     "device_port": self._device_port,
                     "friendlyName": user_input.get("deviceName", self._device_sn),
