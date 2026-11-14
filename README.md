@@ -218,3 +218,4 @@ This makes it easy to diagnose silent register drops or mode changes not stickin
 
 - Requires the device to be on the same local network
 - TCP connection is persistent and shared across all entities for the same device
+- [docs/REGISTERS.md](docs/REGISTERS.md) is a reference copy of the inverter register map from [makstech/esphome-aecc](https://github.com/makstech/esphome-aecc) (GPL-3.0). Its addresses are the inverter's own Modbus registers, not the datalogger registers this integration uses
