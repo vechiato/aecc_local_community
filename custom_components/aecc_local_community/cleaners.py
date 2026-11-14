@@ -25,6 +25,9 @@ from typing import Any
 # over a minute. A genuinely empty pack publishes 0 once the window passes.
 SOC_ZERO_WARMUP_SECONDS = 60.0
 
+# Resolution of reported SOC; the rate check tolerates one step of quantisation.
+SOC_STEP_PCT = 1.0
+
 
 @dataclass
 class CleanerContext:
@@ -50,7 +53,7 @@ def clean_soc(ctx: CleanerContext) -> float | None:
     raw = ctx.raw_value
     profile = ctx.profile
     threshold_w = float(profile.get("soc_zero_reject_during_active_w", 100))
-    max_rate = float(profile.get("soc_max_rate_pct_per_min", 8.0))
+    max_rate = float(profile.get("soc_max_rate_pct_per_min", 4.0))
 
     if raw == 0 and ctx.wall_power_w is not None and abs(ctx.wall_power_w) > threshold_w:
         return None
@@ -67,8 +70,10 @@ def clean_soc(ctx: CleanerContext) -> float | None:
     ):
         elapsed_s = ctx.now - ctx.last_accepted_at
         if elapsed_s >= 1.0:  # ignore sub-second gaps between same-poll calls
-            change_per_min = abs(raw - ctx.last_accepted_value) / (elapsed_s / 60.0)
-            if change_per_min > max_rate:
+            # SOC is reported in whole percent, so one step is always allowed on
+            # top of the rate: a real 1% tick between two 10s polls reads as 6%/min.
+            allowed = max_rate * elapsed_s / 60.0 + SOC_STEP_PCT
+            if abs(raw - ctx.last_accepted_value) > allowed:
                 return None
 
     return raw
@@ -76,9 +81,11 @@ def clean_soc(ctx: CleanerContext) -> float | None:
 
 # Default profile for generic AECC devices.
 # Tuned conservatively — accept most readings, only reject clear glitches.
+# 4%/min is over twice a PS240's physical maximum (~1.7%/min, 2.4 kWh at 2.4 kW)
+# and still rejects a 2% jump within one 10s poll.
 DEFAULT_PROFILE: dict[str, Any] = {
     "soc_zero_reject_during_active_w": 100,
-    "soc_max_rate_pct_per_min": 8.0,
+    "soc_max_rate_pct_per_min": 4.0,
 }
 
 # ── Storage_list frame checks ─────────────────────────────────────────────────

@@ -33,6 +33,14 @@ def test_startup_zero_soc_window():
     assert soc(0, elapsed=30, last=1) == 0  # once a value is accepted, a slow 1%->0% passes
 
 
+
+def test_soc_rate_tolerates_one_step():
+    for poll in (5, 10, 30, 60):
+        assert soc(51, elapsed=poll, last=50) == 51  # a real 1% tick passes at any poll interval
+    assert soc(52, elapsed=10, last=50) is None  # 2% in one 10s poll is a glitch
+    assert soc(30, elapsed=60, last=50) is None  # 20% in a minute is a glitch
+    assert soc(30, elapsed=300, last=50) == 30  # after a long gap a large real change passes
+
 def test_frame_suspect_reason():
     good = frame(A, B)
     assert c.frame_suspect_reason(good, None) is None  # startup: nothing to compare
