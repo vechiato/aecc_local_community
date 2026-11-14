@@ -64,7 +64,15 @@ async def async_get_config_entry_diagnostics(
     hass: HomeAssistant,
     entry: ConfigEntry,
 ) -> dict[str, Any]:
-    coordinator: AECCDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    if entry_data is None:
+        # Not loaded (disabled, e.g. a secondary unit already reported by its primary,
+        # or failed setup): there is no coordinator to describe.
+        return {
+            "integration": {"domain": DOMAIN, "version": await _read_integration_version(hass)},
+            "entry": {"state": entry.state.value, "disabled_by": entry.disabled_by},
+        }
+    coordinator: AECCDataUpdateCoordinator = entry_data["coordinator"]
 
     poll_seconds: int | None = None
     if coordinator.update_interval is not None:
