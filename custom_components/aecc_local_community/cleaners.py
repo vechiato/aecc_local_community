@@ -39,6 +39,7 @@ class CleanerContext:
     wall_power_w: float | None       # total battery activity power (abs used only)
     profile: dict[str, Any]
     seconds_since_first_poll: float | None = None  # None before the first valid frame
+    unit_status: int | None = None   # StorageStatus of the unit, None for system-level fields
 
 
 def clean_soc(ctx: CleanerContext) -> float | None:
@@ -56,6 +57,11 @@ def clean_soc(ctx: CleanerContext) -> float | None:
     max_rate = float(profile.get("soc_max_rate_pct_per_min", 4.0))
 
     if raw == 0 and ctx.wall_power_w is not None and abs(ctx.wall_power_w) > threshold_w:
+        return None
+
+    # A unit in StorageStatus 0 reports SOC 0 regardless of its charge (seen on a
+    # full PS240 that keeps dropping off the bus). Real empty readings come with status 1.
+    if raw == 0 and ctx.unit_status == 0:
         return None
 
     if raw == 0 and ctx.last_accepted_value is None:

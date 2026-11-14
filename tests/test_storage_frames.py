@@ -17,11 +17,12 @@ A = {"StorageSN": "A", "BatterySoc": 60, "StorageStatus": 1}
 B = {"StorageSN": "B", "BatterySoc": 55, "StorageStatus": 1}
 
 
-def soc(raw, *, elapsed, last=None, power=0.0):
+def soc(raw, *, elapsed, last=None, power=0.0, status=None):
     return c.clean_soc(c.CleanerContext(
         key="k", raw_value=raw, last_accepted_value=last,
         last_accepted_at=0.0 if last is not None else None, now=elapsed,
         wall_power_w=power, profile=c.DEFAULT_PROFILE, seconds_since_first_poll=elapsed,
+        unit_status=status,
     ))
 
 
@@ -40,6 +41,13 @@ def test_soc_rate_tolerates_one_step():
     assert soc(52, elapsed=10, last=50) is None  # 2% in one 10s poll is a glitch
     assert soc(30, elapsed=60, last=50) is None  # 20% in a minute is a glitch
     assert soc(30, elapsed=300, last=50) == 30  # after a long gap a large real change passes
+
+
+def test_standby_unit_zero_soc_is_held():
+    assert soc(0, elapsed=900, last=100, status=0) is None  # asleep after a full charge, any gap
+    assert soc(0, elapsed=900, last=None, status=0) is None  # even with nothing accepted yet
+    assert soc(0, elapsed=900, last=14, status=1) == 0  # nightly BMS snap to empty is real
+    assert soc(57, elapsed=10, last=57, status=0) == 57  # non-zero SOC in standby is kept
 
 def test_frame_suspect_reason():
     good = frame(A, B)
