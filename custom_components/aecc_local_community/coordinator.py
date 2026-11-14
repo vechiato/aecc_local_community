@@ -68,6 +68,13 @@ _WIFI_RSSI_REFRESH_SECONDS = 60
 _SUSPECT_FRAME_TOLERANCE = 3
 
 
+def _as_int(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _enabled_slots(params: dict) -> list[tuple[str, list[str]]]:
     """Enabled app-schedule slots as (register, fields)."""
     slots = []
@@ -221,6 +228,7 @@ class AECCDataUpdateCoordinator(DataUpdateCoordinator):
                     wall_power_w=wall_power,
                     profile=DEFAULT_PROFILE,
                     seconds_since_first_poll=now - self._first_poll_at,
+                    unit_status=_as_int(item.get("StorageStatus")),
                 )
                 result = cleaner(ctx)
                 if result is None:
