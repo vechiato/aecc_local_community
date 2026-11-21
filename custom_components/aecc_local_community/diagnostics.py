@@ -116,6 +116,7 @@ async def async_get_config_entry_diagnostics(
             "suspect_frames_total": coordinator.suspect_frames_total,
             "last_suspect_reason": coordinator.last_suspect_reason,
             "wifi_rssi_dbm": coordinator.wifi_rssi,
+            "modbus_telemetry": coordinator.telemetry,
             "last_datalogger_restart_at": (
                 coordinator.last_datalogger_restart_at.isoformat()
                 if coordinator.last_datalogger_restart_at else None

@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import struct
 from typing import Any, Dict, Optional
 
 from .tcp_manager import READ_TIMEOUT_SUSPECT_THRESHOLD, TCPClientManager
@@ -13,6 +14,32 @@ _REG_WIFI_RSSI = 76  # DeviceManagement register: Wi-Fi signal in dBm
 _REG_DATALOGGER_RESTART = "32"  # DeviceManagement register: write 1 to reboot the logger
 _RESTART_REPLY_TIMEOUT = 2  # the logger usually drops the socket before replying
 _DECODER = json.JSONDecoder()
+
+# Read-only Modbus TCP telemetry on the same port (function code 3 only).
+# Register map from StekkerDeal/aecc-battery-local (MIT). On a PS240 only this
+# block answers; 30073 (temperatures) and 52050/52080 (energy) are refused.
+MODBUS_BLOCK_START = 65030
+MODBUS_BLOCK_COUNT = 23
+_MODBUS_TIMEOUT = 3
+
+
+def decode_telemetry(words: list[int]) -> dict[str, int]:
+    """Named values from the 65030 block. 32-bit values are low word first."""
+    def i16(reg: int) -> int:
+        v = words[reg - MODBUS_BLOCK_START]
+        return v - 0x10000 if v >= 0x8000 else v
+
+    def u16(reg: int) -> int:
+        return words[reg - MODBUS_BLOCK_START]
+
+    return {
+        "fault": u16(65039),  # 0 normal, 1 fault
+        "alarm_flags": u16(65051) | u16(65052) << 16,  # bit meanings unknown
+        "nominal_power": i16(65035),
+        "reg_65030": i16(65030),
+        "reg_65031": i16(65031),
+        "reg_65036": i16(65036),  # tracked PV power on a PS240 in one test; unconfirmed
+    }
 
 
 class _ReadTimeout(Exception):
@@ -117,6 +144,39 @@ class AECCDeviceClient:
             finally:
                 await mgr.close()
             return True
+
+    async def read_modbus_block(self, start: int, count: int) -> Optional[list[int]]:
+        """Read holding registers over Modbus TCP, or None on refusal or no reply.
+
+        A short connection of its own: the shared socket's buffer only holds JSON.
+        Held under the I/O lock because the device drops requests sent back to back.
+        """
+        mgr = self.tcp_manager
+        async with mgr.io_lock:
+            writer = None
+            try:
+                async with asyncio.timeout(_MODBUS_TIMEOUT):
+                    reader, writer = await asyncio.open_connection(self.host, self.port)
+                    writer.write(struct.pack(">HHHBBHH", 1, 0, 6, 1, 3, start, count))
+                    await writer.drain()
+                    _tid, _proto, length = struct.unpack(">HHH", await reader.readexactly(6))
+                    body = await reader.readexactly(length)  # unit id, function, payload
+                if body[1] & 0x80:
+                    _LOGGER.debug("Modbus %d x%d refused, exception %d", start, count, body[2])
+                    return None
+                if body[2] != 2 * count:
+                    return None
+                return list(struct.unpack(f">{count}H", body[3:3 + 2 * count]))
+            except (TimeoutError, OSError, asyncio.IncompleteReadError, struct.error, IndexError) as e:
+                _LOGGER.debug("Modbus %d x%d failed: %r", start, count, e)
+                return None
+            finally:
+                if writer is not None:
+                    writer.close()
+
+    async def get_telemetry(self) -> Optional[dict[str, int]]:
+        words = await self.read_modbus_block(MODBUS_BLOCK_START, MODBUS_BLOCK_COUNT)
+        return decode_telemetry(words) if words else None
 
     async def turn_on_switch(self, attr) -> bool:
         return await self.send_switch_command(attr, True)

@@ -167,6 +167,8 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     sensors.append(AECCFailureCountSensor(coordinator, device_sn))
     if coordinator.wifi_rssi is not None:
         sensors.append(AECCWifiSignalSensor(coordinator, device_sn))
+    if coordinator.telemetry is not None:
+        sensors.extend(AECCTelemetrySensor(coordinator, device_sn, *d) for d in TELEMETRY_SENSOR_DEFS)
 
     async_add_entities(sensors)
 
@@ -515,6 +517,48 @@ class AECCWifiSignalSensor(CoordinatorEntity, SensorEntity):
     @property
     def native_value(self):
         return self.coordinator.wifi_rssi
+
+    @property
+    def device_info(self):
+        return {
+            "identifiers": {(DOMAIN, self._device_sn)},
+            "name": self._device_sn,
+            "manufacturer": "AECC",
+        }
+
+
+# (key, name, unit, enabled by default). The raw registers are unnamed in every
+# source; they are here to be watched, not relied on.
+TELEMETRY_SENSOR_DEFS = [
+    ("nominal_power", "Nominal Power", UnitOfPower.WATT, True),
+    ("reg_65030", "Register 65030", None, False),
+    ("reg_65031", "Register 65031", None, False),
+    ("reg_65036", "Register 65036", None, False),
+]
+
+
+class AECCTelemetrySensor(CoordinatorEntity, SensorEntity):
+    """A value from the Modbus telemetry block, refreshed every 30 s."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_has_entity_name = True
+
+    def __init__(self, coordinator, device_sn: str, key: str, name: str, unit, enabled: bool) -> None:
+        super().__init__(coordinator)
+        self._device_sn = device_sn
+        self._key = key
+        self._attr_unique_id = f"aecc_{device_sn}_modbus_{key}"
+        self._attr_name = name
+        self._attr_native_unit_of_measurement = unit
+        self._attr_entity_registry_enabled_default = enabled
+        if unit == UnitOfPower.WATT:
+            self._attr_device_class = SensorDeviceClass.POWER
+        else:
+            self._attr_state_class = SensorStateClass.MEASUREMENT
+
+    @property
+    def native_value(self):
+        return (self.coordinator.telemetry or {}).get(self._key)
 
     @property
     def device_info(self):

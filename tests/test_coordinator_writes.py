@@ -220,6 +220,26 @@ async def test_has_app_schedule_follows_schedule_slots():
     assert not c.has_app_schedule  # only Smart slots left: manual control stays available
 
 
+async def test_telemetry_refresh_keeps_last_values_on_failure():
+    c = make()
+    answers = [{"fault": 0}, None]
+    async def get_telemetry():
+        return answers.pop(0)
+    c.client.get_telemetry = get_telemetry
+    await c.async_probe_telemetry()
+    assert c.telemetry == {"fault": 0}
+    c._last_telemetry_refresh -= coordinator._TELEMETRY_REFRESH_SECONDS
+    await c._maybe_refresh_telemetry()
+    assert c.telemetry == {"fault": 0} and not answers  # read failed, value kept
+    c = make()
+    async def none():
+        return None
+    c.client.get_telemetry = none
+    await c.async_probe_telemetry()
+    await c._maybe_refresh_telemetry()
+    assert c.telemetry is None  # no answer at setup: never polled again
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):
