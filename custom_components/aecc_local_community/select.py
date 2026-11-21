@@ -26,6 +26,10 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     coordinator: AECCDataUpdateCoordinator = hass.data[DOMAIN][config_entry.entry_id]["coordinator"]
+    # Any mode replaces the app schedule's first slot, so don't offer it when an app schedule exists.
+    if coordinator.trough_charge_soc is not None or coordinator.day_reserve_soc is not None:
+        _LOGGER.info("App schedule found; Operating Mode not created")
+        return
     device_sn = config_entry.data["device_sn"]
     async_add_entities([AECCOperatingModeSelect(coordinator, config_entry, device_sn)])
 

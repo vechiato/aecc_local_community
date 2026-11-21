@@ -73,7 +73,7 @@ If you are running a different firmware version and some of these fields work co
 
 ## Battery control
 
-Inverter/Storage devices expose five control entities in addition to read-only sensors, plus **Trough Charge Target** and **Day Reserve** when the AECC app schedule has matching slots.
+Inverter/Storage devices expose five control entities in addition to read-only sensors, plus **Trough Charge Target** and **Day Reserve** when the AECC app schedule has matching slots. When either of those is present, Operating Mode is not created (see below).
 
 ### Operating Mode
 
@@ -83,6 +83,8 @@ Inverter/Storage devices expose five control entities in addition to read-only s
 | **Idle** | Battery does nothing — no charging or discharging. |
 | **Charge** | Forces the battery to charge at the **Charge Power** slider value. |
 | **Discharge** | Forces the battery to discharge at the **Discharge Power** slider value. |
+
+Every mode replaces the AECC app schedule's first slot, so Operating Mode is not created when the app schedule has a Troughs slot, or a Smart Linkage slot leading into a Peaks slot. The schedule is read when the integration starts: after adding or removing those slots in the app, reload the integration. On an install that had Operating Mode before, the old entity shows as no longer provided and can be deleted.
 
 Selecting a mode writes up to 6 control registers atomically. The integration verifies the write was accepted by reading the registers back. On success, all coordinator state variables are updated immediately and pushed to all listening entities — no need to wait for the next poll.
 
@@ -151,7 +153,7 @@ automation:
 
 If the forecast is unavailable, `float(0)` makes the surplus 0, so it charges to 100% and keeps a 50% reserve.
 
-> **Note:** the Operating Mode selector replaces the app schedule's first slot. If you schedule in the app, don't use Operating Mode.
+> **Note:** Operating Mode replaces the app schedule's first slot, so it is hidden while these sliders exist.
 
 ## Configuration options
 
