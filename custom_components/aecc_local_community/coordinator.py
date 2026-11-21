@@ -424,6 +424,11 @@ class AECCDataUpdateCoordinator(DataUpdateCoordinator):
 
         return True
 
+    @property
+    def has_app_schedule(self) -> bool:
+        """The vendor-app schedule has a slot HA can tune; manual control would overwrite it."""
+        return self.trough_charge_soc is not None or self.day_reserve_soc is not None
+
     # ── Control API ───────────────────────────────────────────────────────────
 
     def _slot_for(self, direction: str, power_w: int) -> str:

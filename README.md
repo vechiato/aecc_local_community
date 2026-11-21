@@ -104,7 +104,7 @@ Both sliders write to the device immediately on change. On startup the integrati
 | **Charge Power** | 800 W | Power applied when Operating Mode → Charge |
 | **Discharge Power** | 800 W | Power applied when Operating Mode → Discharge |
 
-These sliders are passive — they store the target locally and do not send a command to the device by themselves. The power is applied the next time the mode is set to Charge or Discharge.
+These sliders are passive — they store the target locally and do not send a command to the device by themselves. The power is applied the next time the mode is set to Charge or Discharge. Like Operating Mode, they are not created when the app schedule exists.
 
 > **Note:** 800 W is the observed reliable limit for local TCP control. Higher values may work on some devices but are not guaranteed.
 

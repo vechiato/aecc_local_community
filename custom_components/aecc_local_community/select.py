@@ -27,7 +27,7 @@ async def async_setup_entry(
 ) -> None:
     coordinator: AECCDataUpdateCoordinator = hass.data[DOMAIN][config_entry.entry_id]["coordinator"]
     # Any mode replaces the app schedule's first slot, so don't offer it when an app schedule exists.
-    if coordinator.trough_charge_soc is not None or coordinator.day_reserve_soc is not None:
+    if coordinator.has_app_schedule:
         _LOGGER.info("App schedule found; Operating Mode not created")
         return
     device_sn = config_entry.data["device_sn"]
