@@ -181,6 +181,18 @@ Each device exposes these diagnostic sensors to help with troubleshooting:
 
 These sensors are hidden by default — enable them under the device's entity list if needed.
 
+### Fault and Modbus telemetry
+
+Some devices also answer read-only Modbus TCP requests on port 8080. The integration tries this once at setup. If the device answers, it adds these entities, refreshed every 30 seconds:
+
+| Entity | Description |
+|--------|-------------|
+| Fault | Binary sensor, on when the device reports a fault (register 65039). Attribute `alarm_flags` is the raw alarm word (65051); the bit meanings are unknown |
+| Nominal Power | The inverter's rated power in W (65035); 1200 W on a PS240 |
+| Register 65030 / 65031 / 65036 | Unnamed values, disabled by default. On a PS240, 65036 matched PV power in two readings; unconfirmed |
+
+A failed read keeps the last values. Register map from [StekkerDeal/aecc-battery-local](https://github.com/StekkerDeal/aecc-battery-local) (MIT). On a PS240 only this block answers: temperatures (30073) and the device's energy counters (52050, 52080) are refused.
+
 ### Restart Data Logger
 
 A **Restart Data Logger** button (under the device's configuration entities) reboots the device's Wi-Fi datalogger over the local connection. Use it when the device stops answering polls but is still on the network. Expect the device to be unreachable for a short while as the logger reboots; the integration reconnects on its own.
@@ -192,7 +204,7 @@ A **Restart Data Logger** button (under the device's configuration entities) reb
 Go to **Settings → Devices & Services → AECC Local (Community) → ⋮ → Download diagnostics** to get a full redacted snapshot including:
 
 - Integration version and device identity (host, IP, and serial number redacted)
-- Live coordinator state — commanded mode, SOC limits, failure reason, consecutive failures, Wi-Fi signal
+- Live coordinator state — commanded mode, SOC limits, failure reason, consecutive failures, Wi-Fi signal, Modbus telemetry
 - SOC cleaner state — last accepted values and timestamps
 - Partial-frame counters — how many incomplete battery-list polls were held and the last reason (unit count only, no serials)
 - Last raw poll response

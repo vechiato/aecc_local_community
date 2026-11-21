@@ -62,6 +62,7 @@ _WRITE_RETRY_OUTAGE_STREAK = 3
 # Wi-Fi signal changes slowly and costs a separate command, so re-read it well
 # below the poll rate.
 _WIFI_RSSI_REFRESH_SECONDS = 60
+_TELEMETRY_REFRESH_SECONDS = 30
 
 # Hold a partial Storage_list frame this many polls before accepting it as a
 # real change (unit removed/replaced).
@@ -152,6 +153,9 @@ class AECCDataUpdateCoordinator(DataUpdateCoordinator):
         # None until the setup probe reads it; stays None on devices without it.
         self.wifi_rssi: int | None = None
         self._last_rssi_refresh: float | None = None
+        # Modbus telemetry; None unless the setup probe answered.
+        self.telemetry: dict[str, int] | None = None
+        self._last_telemetry_refresh: float | None = None
         # None unless the vendor-app schedule has a Troughs slot.
         self.trough_charge_soc: int | None = None
         # None unless the schedule has a Smart Linkage slot running up to a Peaks slot.
@@ -292,6 +296,7 @@ class AECCDataUpdateCoordinator(DataUpdateCoordinator):
             self._last_good_time = dt_util.utcnow()
             self.last_failure_reason = None
             await self._maybe_refresh_wifi_rssi()
+            await self._maybe_refresh_telemetry()
             return data
 
         self._consecutive_failures += 1
@@ -547,6 +552,24 @@ class AECCDataUpdateCoordinator(DataUpdateCoordinator):
         rssi = await self.client.get_wifi_rssi()
         if rssi is not None:  # a failed read keeps the last value
             self.wifi_rssi = rssi
+
+    async def async_probe_telemetry(self) -> None:
+        """Read the Modbus telemetry once at setup; refreshes run only if this works."""
+        self.telemetry = await self.client.get_telemetry()
+        self._last_telemetry_refresh = time.monotonic()
+        if self.telemetry is None:
+            _LOGGER.debug("Modbus telemetry not answered by this device; no entities created")
+
+    async def _maybe_refresh_telemetry(self) -> None:
+        if self.telemetry is None or self._last_telemetry_refresh is None:
+            return
+        now = time.monotonic()
+        if now - self._last_telemetry_refresh < _TELEMETRY_REFRESH_SECONDS:
+            return
+        self._last_telemetry_refresh = now
+        telemetry = await self.client.get_telemetry()
+        if telemetry is not None:  # a failed read keeps the last values
+            self.telemetry = telemetry
 
     async def _set_slot_soc(self, find_slot, field: int, soc: int, name: str) -> bool:
         """Change one SoC field of one app-schedule slot.
