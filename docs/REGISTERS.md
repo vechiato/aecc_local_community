@@ -1,7 +1,13 @@
 <!--
 Reference copy of docs/REGISTERS.md from makstech/esphome-aecc
 (https://github.com/makstech/esphome-aecc, commit 5436c19, 2026-09-26),
-licensed GPL-3.0. Copied unmodified apart from this note.
+licensed GPL-3.0. Copied unmodified apart from this note and these changes:
+- 0xFE08 relabelled as AC charge power and 0xFE1F (PV power) added, following
+  makstech/esphome-aecc commit 3556259; that repo's own REGISTERS.md still
+  says "losses".
+- Notes on 3021 and 3039 in "Not on Modbus", from StekkerDeal/aecc-battery-local
+  issue #36 and StekkerDeal/aecc-battery-homey docs/protocol.md. Reported on
+  other AECC-platform brands, not yet confirmed on an AFERIY PS240/PS420.
 
 These are the inverter's own Modbus register addresses (0xFExx, 0xAxxx),
 read over the RS485 link by that ESPHome component. This integration talks
@@ -60,9 +66,10 @@ Read-only, and each has a `sensor:` key.
 |---|---|---|---|
 | State of charge | `soc` | `0xFE06` | % |
 | Battery power | `battery_power` | `0xFE07` | signed; positive discharging |
-| Standby and conversion loss | `losses` | `0xFE08` | W |
+| AC charge power | `ac_charge_power` | `0xFE08` | W; drawn from AC to charge, including AC-coupled PV; 0 while discharging |
 | Grid power at the inverter's own port | `grid_power` | `0xFE0A` | signed; positive exporting |
 | Backup (EPS) load | `backup_load` | `0xFE10` | W |
+| PV power | `pv_power` | `0xFE1F` | signed; AC-coupled PV port, negative producing |
 | Active power setpoint | `setpoint` | `0xFE16` | signed; positive discharging |
 
 ## Battery
@@ -289,8 +296,8 @@ give it a `datalogger:` block.
 | `3000` | Energy manager enable; nothing regulates while it is 0 |
 | `3003`–`3018` | Sixteen schedule slots, eleven CSV fields; field four is the signed setpoint |
 | `3020` | Scheduler mode: 3 self-consumption, 6 custom — the `work_mode_select` key |
-| `3021` / `3022` | Self-consumption charge and discharge enables |
+| `3021` / `3022` | Self-consumption charge and discharge enables. Writing `3021` = 1 turns on the vendor app's AI Mode; the cloud then writes its day plan into `3003` onwards, and a slot's discharge SOC overrides `3023` |
 | `3023` / `3024` | Min and max SOC, % |
 | `3026` / `3029` | Base discharge power and its enable; positive exports unconditionally |
 | `3030` | Custom mode; required before `0xFE16` is honoured |
-| `3039` | Max feed power, W — the third copy of the grid-tie cap |
+| `3039` | Max feed power, W — the third copy of the grid-tie cap. The firmware clamps the power written to `3003` to this value, an effective 800 W by default; raise it first for more |
