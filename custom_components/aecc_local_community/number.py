@@ -30,9 +30,13 @@ async def async_setup_entry(
     async_add_entities([
         AECCMinSoc(coordinator, config_entry, device_sn),
         AECCMaxSoc(coordinator, config_entry, device_sn),
-        AECCChargePowerSlider(coordinator, config_entry, device_sn),
-        AECCDischargePowerSlider(coordinator, config_entry, device_sn),
     ])
+    # The power sliders only feed Operating Mode, which is not created alongside an app schedule.
+    if not coordinator.has_app_schedule:
+        async_add_entities([
+            AECCChargePowerSlider(coordinator, config_entry, device_sn),
+            AECCDischargePowerSlider(coordinator, config_entry, device_sn),
+        ])
     async_add_entities([
         cls(coordinator, config_entry, device_sn)
         for cls in (AECCTroughChargeTarget, AECCDayReserve)

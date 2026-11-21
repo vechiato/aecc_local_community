@@ -207,6 +207,19 @@ async def test_trough_target_refuses_without_trough_slot():
     assert c.client.writes == []
 
 
+async def test_has_app_schedule_follows_schedule_slots():
+    c = make()
+    c.client = ScheduleClient()
+    await c.async_read_initial_state()
+    assert c.has_app_schedule
+    c = make()
+    c.client = ScheduleClient()
+    for reg in ("3004", "3005", "3006"):
+        c.client.regs[reg] = "0,00:00,00:00,0,0,0,0,0,0,100,10"
+    await c.async_read_initial_state()
+    assert not c.has_app_schedule  # only Smart slots left: manual control stays available
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):
